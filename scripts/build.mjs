@@ -11,6 +11,9 @@
  *         directement pour qui ouvre le lien. Les vidéos sont recompressées en
  *         MP4 (H.264, 1280 px max) si ffmpeg est installé, pour que le
  *         téléphone les charge vite.
+ *       → si nos-souvenirs/ est absent ou vide (cas de Vercel, Netlify, GitHub
+ *         Actions… puisque le dossier n'est jamais envoyé sur Git), le build ne
+ *         plante pas : il produit le site seul, avec l'import depuis le téléphone.
  *
  * Options : --source=chemin  --sortie=dist  --sans-medias  --copie-brute  --max-video=1920
  */
@@ -45,23 +48,28 @@ for (const f of APP_FILES) {
 }
 console.log(`✅ Site copié dans ${path.relative(projectRoot, out)}/`);
 
-if (!withMedia) {
-  console.log('   (sans médias : les souvenirs s\'ajoutent depuis le téléphone)');
+function siteOnly(reason) {
+  if (reason) console.log(reason);
+  console.log('✅ Build terminé : site seul, les souvenirs s\'ajoutent depuis le téléphone (« Ajouter nos souvenirs »).');
   process.exit(0);
 }
 
+if (!withMedia) siteOnly();
+
 const hasSource = await fs.stat(source).then((s) => s.isDirectory()).catch(() => false);
 if (!hasSource) {
-  console.error(`❌ Dossier introuvable : ${source}\n   Copie nos-souvenirs/ à la racine du projet, ou utilise --sans-medias.`);
-  process.exit(1);
+  siteOnly(`ℹ️  Pas de dossier ${path.relative(projectRoot, source) || source} ici : aucun média n'est intégré au site (c'est normal sur Vercel).`);
+}
+
+const media = await scanMedia(source);
+if (!media.length) {
+  siteOnly(`ℹ️  Aucune photo ni vidéo dans ${path.relative(projectRoot, source)}/ : aucun média n'est intégré au site.`);
 }
 
 const hasFfmpeg = !args['copie-brute'] && spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).status === 0;
 if (!hasFfmpeg && !args['copie-brute']) {
   console.log('ℹ️  ffmpeg introuvable : les vidéos sont copiées telles quelles (plus lourdes).');
 }
-
-const media = await scanMedia(source);
 const mediaDir = path.join(out, 'nos-souvenirs');
 const used = new Set();
 const items = [];

@@ -1,0 +1,5 @@
+# Ne jamais envoyer les souvenirs personnels à Vercel (déploiement via la CLI `vercel`).
+nos-souvenirs/
+souvenirs.json
+dist/
+node_modules/

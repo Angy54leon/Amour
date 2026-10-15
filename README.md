@@ -57,6 +57,17 @@ ajouter les souvenirs directement depuis l'iPhone.
 **Ou Netlify Drop**, sans compte GitHub : lance `npm run build:site`, puis glisse le dossier
 `dist/` sur https://app.netlify.com/drop.
 
+**Vercel** (le fichier `vercel.json` est déjà prêt) :
+
+1. Sur vercel.com : **Add New… → Project**, importe le dépôt GitHub `Amour`.
+2. Laisse **Framework Preset : Other** et **Root Directory** vide. Pas besoin de remplir
+   Build Command ni Output Directory : `vercel.json` impose `npm run build` et `dist`.
+3. **Deploy**. Chaque nouveau push sur la branche de production redéploie le site.
+
+Le build n'a besoin d'**aucun média** : `nos-souvenirs/` n'est jamais envoyé sur Git ni sur
+Vercel (`.gitignore`, `.vercelignore`). Le script de build produit alors le site seul, et
+les souvenirs s'ajoutent depuis l'iPhone.
+
 Astuce : dans Safari, **Partager → « Sur l'écran d'accueil »** donne une icône d'app et un
 affichage plein écran.
 
@@ -85,11 +96,13 @@ affichage plein écran.
    ```bash
    npm run build
    ```
-   Le dossier `dist/` contient le site, les médias et `souvenirs.json`. Les vidéos sont
+   Le dossier `dist/` contient le site, les médias et `souvenirs.json`. Si le dossier
+   `nos-souvenirs/` est absent ou vide, le build ne plante pas : il produit le site seul. Les vidéos sont
    recompressées en MP4 H.264 (1280 px max) pour se charger vite sur un téléphone, et
    les vidéos illisibles sont écartées. Options : `--max-video=1920`, `--copie-brute`,
    `--source=chemin`.
-3. Mets `dist/` en ligne : glisse-le sur Netlify Drop, par exemple. Vérifie les limites
+3. Mets `dist/` en ligne : glisse-le sur Netlify Drop, ou avec la CLI Vercel
+   `npx vercel deploy dist --prod`. Vérifie les limites
    de taille de ton hébergeur : certains refusent les fichiers de plus de 25 Mo, et le
    script te prévient le cas échéant.
 4. Envoie-lui le lien : l'écran d'accueil s'ouvre directement sur « Tu veux voir le bonheur ? ».
