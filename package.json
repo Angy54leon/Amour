@@ -1,0 +1,15 @@
+{
+  "name": "amour-des-deux-zigs",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Album de souvenirs romantique et interactif : L'amour des deux zigs.",
+  "scripts": {
+    "start": "node scripts/serve.mjs",
+    "liste": "node scripts/generer-liste.mjs",
+    "build": "node scripts/build.mjs",
+    "build:site": "node scripts/build.mjs --sans-medias"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

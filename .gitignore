@@ -1,0 +1,6 @@
+# Souvenirs personnels : ne jamais les pousser sur GitHub par accident.
+nos-souvenirs/
+souvenirs.json
+dist/
+node_modules/
+.DS_Store

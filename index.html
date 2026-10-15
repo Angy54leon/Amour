@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#3a0f1d">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Deux zigs">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <title>L'amour des deux zigs</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23c9677c' d='M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500;1,600&family=Great+Vibes&family=Nunito:wght@500;600;700&display=swap">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <!-- Cœurs flottants communs à tous les écrans -->
+  <div class="heart-field" id="heart-field" aria-hidden="true"></div>
+
+  <!-- Titre permanent pendant tout l'album -->
+  <header class="title-bar" id="title-bar" hidden>
+    <span class="title-ornament" aria-hidden="true"></span>
+    <h1 class="title">L'amour des deux zigs</h1>
+    <span class="title-ornament" aria-hidden="true"></span>
+  </header>
+
+  <main>
+    <!-- 0. Préparation (pour toi uniquement, avant de lui montrer) -->
+    <section class="screen setup" id="screen-setup" hidden>
+      <div class="setup-card">
+        <p class="setup-kicker">Avant la surprise</p>
+        <h2 class="setup-title">Nos souvenirs</h2>
+        <p class="setup-text">
+          Choisis vos photos et vidéos. Elles sont lues directement par ton navigateur&nbsp;:
+          rien n'est envoyé sur Internet.
+        </p>
+
+        <div class="setup-actions">
+          <label class="soft-btn soft-btn--primary soft-btn--big" id="add-label">
+            <input type="file" id="pick-files" class="file-input" multiple accept="image/*,video/*">
+            <span aria-hidden="true">💞</span><span>Ajouter nos souvenirs</span>
+          </label>
+          <label class="soft-btn" id="pick-folder-label" hidden>
+            <input type="file" id="pick-folder" class="file-input" webkitdirectory directory multiple>
+            <span aria-hidden="true">📁</span><span>Choisir le dossier nos-souvenirs</span>
+          </label>
+        </div>
+        <p class="setup-hint" id="setup-hint"></p>
+
+        <div class="drop-zone" id="drop-zone" hidden>
+          <span>…ou glisse le dossier ici</span>
+        </div>
+
+        <div class="setup-status" id="setup-status" aria-live="polite"></div>
+
+        <div class="setup-ready" id="setup-ready" hidden>
+          <p class="setup-summary" id="setup-summary"></p>
+          <details class="setup-skipped" id="setup-skipped" hidden>
+            <summary></summary>
+            <ul></ul>
+          </details>
+
+          <div class="keep" id="keep-block" hidden>
+            <label class="keep-toggle">
+              <input type="checkbox" id="keep-local">
+              <span class="keep-switch" aria-hidden="true"></span>
+              <span>Garder ces souvenirs sur cet appareil</span>
+            </label>
+            <p class="keep-note" id="keep-note">
+              Sans cette option, il faudra les ajouter à nouveau à chaque visite.
+            </p>
+          </div>
+
+          <button type="button" class="soft-btn soft-btn--primary soft-btn--big" id="start-surprise">
+            Commencer la surprise ✨
+          </button>
+          <button type="button" class="link-btn" id="clear-all">Tout retirer</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 1. Accueil -->
+    <section class="screen intro" id="screen-intro" hidden>
+      <div class="intro-inner">
+        <p class="intro-kicker">Une petite surprise, rien que pour toi</p>
+        <h2 class="intro-question" id="intro-question">Tu veux voir le <span class="nowrap">bonheur ? ❤️</span></h2>
+        <div class="intro-slot" id="intro-slot">
+          <button type="button" class="happy-btn" id="happy-btn">Oui, je veux voir le bonheur 🥹</button>
+        </div>
+        <p class="intro-tease" id="intro-tease" aria-live="polite"></p>
+      </div>
+    </section>
+
+    <!-- 2. Album -->
+    <section class="screen album" id="screen-album" hidden>
+      <div class="ambient" aria-hidden="true">
+        <div class="ambient-layer"></div>
+        <div class="ambient-layer"></div>
+      </div>
+      <div class="stage" id="stage"></div>
+      <div class="album-toast" id="album-toast" role="status" aria-live="polite"></div>
+      <div class="album-bottom">
+        <div class="progress" aria-hidden="true"><span class="progress-fill" id="progress-fill"></span></div>
+        <nav class="controls" aria-label="Navigation dans l'album">
+          <button type="button" class="ctrl" id="ctrl-prev" aria-label="Souvenir précédent">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+          </button>
+          <button type="button" class="ctrl ctrl--main" id="ctrl-toggle" aria-label="Mettre en pause">
+            <svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6v12M15 6v12"/></svg>
+            <svg class="icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"/></svg>
+          </button>
+          <span class="counter" id="counter" aria-live="polite">1 / 1</span>
+          <button type="button" class="ctrl" id="ctrl-next" aria-label="Souvenir suivant">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+          </button>
+        </nav>
+      </div>
+    </section>
+
+    <!-- 3. Fin -->
+    <section class="screen ending" id="screen-end" hidden>
+      <div class="ending-glow" aria-hidden="true"></div>
+      <div class="ending-inner">
+        <p class="ending-message" id="ending-message"><span class="w">Je</span> <span class="w">t'aime</span> <span class="w">mon</span> <span class="w">coeur</span> <span class="w w--heart">❤️</span></p>
+        <button type="button" class="soft-btn soft-btn--ghost" id="replay">Revoir l'album</button>
+      </div>
+    </section>
+  </main>
+
+  <!-- Voile de transition entre les écrans -->
+  <div class="veil" id="veil" aria-hidden="true"></div>
+
+  <script src="js/utils.js"></script>
+  <script src="js/exif.js"></script>
+  <script src="js/hearts.js"></script>
+  <script src="js/library.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/playlist.js"></script>
+  <script src="js/intro.js"></script>
+  <script src="js/album.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
