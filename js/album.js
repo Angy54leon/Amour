@@ -453,6 +453,18 @@
       updateCounter();
       keepUrls(i);
 
+      if (!entry.ok && item.remote && item.kind === 'image' && /^(heic|heif)$/.test(item.ext) && !item.heicTried) {
+        // Photo HEIC (déposée à la main) que ce navigateur ne sait pas afficher :
+        // on tente de la convertir en JPEG ici. En cas d'échec, elle est sautée.
+        item.heicTried = true;
+        try {
+          item.src = await L.remoteHeicToJpegUrl(item);
+          return transitionTo(i, dir);
+        } catch (_) {
+          /* conversion impossible : souvenir sauté plus bas */
+        }
+      }
+
       if (!entry.ok && item.remote && !item.refreshed && A.cloud) {
         // Lien signé expiré (album resté ouvert longtemps) : on le renouvelle une fois.
         item.refreshed = true;

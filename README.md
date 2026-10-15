@@ -246,9 +246,17 @@ Comment le site utilise Vercel Blob :
   écrasement possible et valable 1 h. Elle n'est délivrée qu'avec le code administrateur.
 - **Confirmation** : un fichier n'est compté qu'après l'acceptation par Vercel, puis la
   vérification serveur `head()` (fichier présent et bonne taille, via `api/confirmer`).
-- **Liste** : `list({ prefix: 'souvenirs/' })` relit le contenu réel du Blob Store. Les
-  informations d'affichage (date, nom) sont rangées dans le nom du fichier, donc aucune base
-  de données n'est nécessaire et la liste ne peut pas diverger du stockage.
+- **Liste** : `list()` relit tout le contenu réel du Blob Store. Toutes les photos et
+  vidéos sont reprises, **y compris celles déposées à la main** depuis le tableau de bord
+  Vercel, dans n'importe quel dossier. Pour les fichiers envoyés par le site, la date et le
+  nom sont rangés dans le nom du fichier. Aucune base de données n'est nécessaire, et la
+  liste ne peut pas diverger du stockage.
+- **Photos HEIC déposées à la main** : Safari les affiche directement. Ailleurs (Chrome
+  sur PC…), l'album tente de les convertir en JPEG ; si c'est impossible, la photo est
+  sautée avec un message.
+- **Souvenirs gardés sur l'iPhone** (option « Garder sur cet appareil ») : dès la connexion
+  avec `ADMIN_CODE`, ils sont transférés en ligne automatiquement, avec un ✓ par fichier.
+  Les copies locales ne sont jamais effacées par le site.
 - **Lecture** : uniquement par liens signés temporaires (`presignUrl`, 24 h au maximum).
 
 Étapes dans Vercel :
@@ -272,8 +280,11 @@ Comment le site utilise Vercel Blob :
    Production (et Preview) :
    - `ALBUM_CODE` : le code pour elle, par exemple une phrase qui vous ressemble ;
    - `ADMIN_CODE` : ton code à toi, différent du premier ;
-   - `SESSION_SECRET` : une longue suite de caractères au hasard (64 environ),
-     **obligatoire** si Vercel a fourni `BLOB_STORE_ID` plutôt qu'un jeton.
+   - `SESSION_SECRET` : une longue suite de caractères au hasard,
+     **obligatoire** si Vercel a fourni `BLOB_STORE_ID` plutôt qu'un jeton. Depuis le
+     téléphone : dans le bandeau orange du site, touche « Générer une valeur pour
+     SESSION_SECRET ». La valeur est créée sur le téléphone, jamais envoyée, et copiée :
+     colle-la dans Vercel.
 
    Coche **Sensitive** pour ces trois variables. Majuscules, accents et espaces en trop
    sont tolérés à la saisie des codes.

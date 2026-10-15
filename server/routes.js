@@ -15,7 +15,7 @@
  *  GET    /api/fichier         lecture signée du stockage local de test
  */
 import { authConfigured, authProblems, roleForCode, roleOf, sessionCookie, clearedCookie, sameOrigin } from './auth.js';
-import { getStorage, describe, isValidPathname, diagnose, MAX_FILE_BYTES, CONTENT_TYPES } from './storage.js';
+import { getStorage, describe, isValidPathname, isMediaPathname, diagnose, MAX_FILE_BYTES, CONTENT_TYPES } from './storage.js';
 
 function send(res, status, data, extraHeaders = {}) {
   const body = JSON.stringify(data);
@@ -101,7 +101,8 @@ const routes = {
     if (!storage || !role) return send(res, 401, { error: 'Connexion nécessaire' });
 
     if (req.method === 'GET') {
-      const entries = (await storage.list()).filter((e) => isValidPathname(e.pathname));
+      // Toutes les photos/vidéos du stockage, y compris celles déposées à la main.
+      const entries = (await storage.list()).filter((e) => isMediaPathname(e.pathname));
       const { urls, expiresAt } = await storage.readUrls(entries);
       // Un média sans lien de lecture (fichier absent du stockage) n'est pas proposé.
       const items = entries.map((e, i) => (urls[i] ? describe(e, urls[i]) : null)).filter(Boolean);
@@ -112,7 +113,7 @@ const routes = {
       if (role !== 'admin') return send(res, 403, { error: 'Réservé au code administrateur' });
       if (!sameOrigin(req)) return send(res, 403, { error: 'Origine refusée' });
       const { pathname } = await readJson(req);
-      if (!isValidPathname(pathname)) return send(res, 400, { error: 'Fichier invalide' });
+      if (!isMediaPathname(pathname)) return send(res, 400, { error: 'Fichier invalide' });
       await storage.remove(pathname);
       return send(res, 200, { ok: true });
     }
@@ -194,9 +195,10 @@ const routes = {
     if (!storage || storage.kind !== 'local') return send(res, 404, { error: 'Indisponible' });
     const url = new URL(req.url, 'http://local');
     const pathname = url.searchParams.get('pathname');
-    if (!isValidPathname(pathname)) return send(res, 400, { error: 'Fichier invalide' });
+    if (!isMediaPathname(pathname)) return send(res, 400, { error: 'Fichier invalide' });
 
     if (req.method === 'PUT') {
+      if (!isValidPathname(pathname)) return send(res, 400, { error: 'Nom de fichier refusé' });
       if (roleOf(req) !== 'admin' || !sameOrigin(req)) return send(res, 403, { error: 'Réservé au code administrateur' });
       const declared = Number(req.headers['content-length'] || 0);
       if (declared > MAX_FILE_BYTES) return send(res, 413, { error: 'Fichier trop volumineux' });
@@ -214,7 +216,7 @@ const routes = {
       }
       const f = await storage.open(pathname).catch(() => null);
       if (!f) return send(res, 404, { error: 'Introuvable' });
-      const ext = pathname.split('.').pop();
+      const ext = pathname.split('.').pop().toLowerCase();
       const headers = {
         'Content-Type': CONTENT_TYPES[ext] || 'application/octet-stream',
         'Accept-Ranges': 'bytes',

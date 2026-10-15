@@ -258,6 +258,7 @@
     'not-configured': {
       tone: 'warn',
       text: () => '⚠️ Sauvegarde en ligne non configurée : les photos ajoutées ici restent seulement dans cet onglet et disparaîtront à la fermeture. Il manque sur Vercel : ' + (saveMissing.join(', ') || 'la configuration') + '.',
+      action: () => (saveMissing.indexOf('SESSION_SECRET') !== -1 ? ['Générer une valeur pour SESSION_SECRET', generateSecret] : null),
     },
     'no-api': {
       tone: 'warn',
@@ -283,9 +284,25 @@
     if (!def) return;
     saveState.className = 'save-state save-state--' + def.tone;
     saveStateText.textContent = def.text();
-    saveAction = def.action ? def.action[1] : null;
-    saveStateAction.hidden = !def.action;
-    if (def.action) saveStateAction.textContent = def.action[0];
+    const action = typeof def.action === 'function' ? def.action() : def.action;
+    saveAction = action ? action[1] : null;
+    saveStateAction.hidden = !action;
+    if (action) saveStateAction.textContent = action[0];
+  }
+
+  /** Valeur aléatoire créée sur ce téléphone, jamais envoyée : à coller dans Vercel. */
+  function generateSecret() {
+    const bytes = new Uint8Array(36);
+    crypto.getRandomValues(bytes);
+    const value = btoa(String.fromCharCode.apply(null, bytes)).replace(/\+/g, '-').replace(/\//g, '_');
+    const field = $('save-state-secret');
+    field.value = value;
+    field.hidden = false;
+    field.focus();
+    field.select();
+    const done = () => (saveStateAction.textContent = 'Copiée ✓ — colle-la dans Vercel comme valeur de SESSION_SECRET');
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(value).then(done, () => {});
+    else saveStateAction.textContent = 'Sélectionne et copie la valeur ci-dessous';
   }
   saveStateAction.addEventListener('click', () => saveAction && saveAction());
 
@@ -459,6 +476,21 @@
     renderSaveState();
     renderSummary();
     renderCloud();
+    const waiting = role === 'admin' ? pendingLocal().length : 0;
+    if (waiting) {
+      // Transfert automatique, sans attendre (le voile se lève tout de suite).
+      // Les copies gardées sur l'appareil ne sont jamais effacées par le site.
+      setTimeout(() => {
+        uploadPending().then(() => {
+          const still = pendingLocal().length;
+          status.textContent +=
+            still
+              ? ` · ${still} encore sur l’iPhone uniquement (copies conservées) : touche « Envoyer en ligne » pour réessayer`
+              : ' · copies locales conservées sur cet iPhone';
+        });
+      }, 0);
+      status.textContent = `📲 ${plural(waiting, 'souvenir gardé', 'souvenirs gardés')} sur cet appareil : transfert en ligne en cours…`;
+    }
     if (role === 'viewer' && !collection.length) status.textContent = 'L’album en ligne est encore vide.';
   }
 

@@ -51,14 +51,52 @@ const PATHNAME_RE = new RegExp(
     ')$'
 );
 
+/** Nom imposé aux fichiers envoyés par le site (seuls autorisés à l'envoi). */
 export function isValidPathname(pathname) {
   return typeof pathname === 'string' && PATHNAME_RE.test(pathname);
+}
+
+const MEDIA_EXT = IMAGE_EXT.concat(VIDEO_EXT);
+const SYSTEM_PREFIXES = [DIAG_PREFIX];
+
+function extOf(pathname) {
+  const m = /\.([A-Za-z0-9]{2,5})$/.exec(pathname);
+  return m ? m[1].toLowerCase() : '';
+}
+
+/**
+ * Toute photo ou vidéo du Blob Store, y compris celles déposées à la main depuis
+ * le tableau de bord Vercel (n'importe quel dossier, n'importe quel nom).
+ */
+export function isMediaPathname(pathname) {
+  return (
+    typeof pathname === 'string' &&
+    pathname.length > 0 &&
+    pathname.length <= 1024 &&
+    !pathname.startsWith('/') &&
+    !pathname.split('/').some((part) => part === '..' || part === '.') &&
+    !SYSTEM_PREFIXES.some((p) => pathname.startsWith(p)) &&
+    MEDIA_EXT.includes(extOf(pathname))
+  );
 }
 
 /** Transforme une entrée du stockage en souvenir pour l'album. */
 export function describe(entry, url) {
   const m = PATHNAME_RE.exec(entry.pathname);
-  if (!m) return null;
+  if (!m) {
+    // Fichier déposé autrement que par le site : on déduit ce qu'on peut.
+    if (!isMediaPathname(entry.pathname)) return null;
+    const ext = extOf(entry.pathname);
+    return {
+      pathname: entry.pathname,
+      src: url,
+      kind: IMAGE_EXT.includes(ext) ? 'image' : 'video',
+      name: entry.pathname.split('/').pop(),
+      size: entry.size,
+      lastModified: entry.uploadedAt || 0,
+      date: null,
+    };
+  }
   const ext = m[5];
   const date = Number(m[3]);
   return {
@@ -107,7 +145,8 @@ function vercelAdapter() {
       const out = [];
       let cursor;
       do {
-        const page = await list({ prefix: PREFIX, cursor, limit: 1000 });
+        // Tout le Blob Store : les fichiers du site ET ceux déposés à la main.
+        const page = await list({ cursor, limit: 1000 });
         for (const b of page.blobs) {
           out.push({ pathname: b.pathname, size: b.size, uploadedAt: +new Date(b.uploadedAt), url: b.url });
         }
@@ -210,14 +249,19 @@ function localAdapter(dir) {
     access: 'private',
     maxFileBytes: MAX_FILE_BYTES,
     async list() {
-      const folder = path.join(root, PREFIX);
-      const names = await fs.readdir(folder).catch(() => []);
       const out = [];
-      for (const name of names) {
-        if (name.endsWith('.part')) continue;
-        const stat = await fs.stat(path.join(folder, name));
-        out.push({ pathname: PREFIX + name, size: stat.size, uploadedAt: stat.mtimeMs });
+      async function walk(dir, prefix) {
+        const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => []);
+        for (const e of entries) {
+          if (e.name.endsWith('.part') || e.name.startsWith('.')) continue;
+          if (e.isDirectory()) await walk(path.join(dir, e.name), prefix + e.name + '/');
+          else if (e.isFile()) {
+            const stat = await fs.stat(path.join(dir, e.name));
+            out.push({ pathname: prefix + e.name, size: stat.size, uploadedAt: stat.mtimeMs });
+          }
+        }
       }
+      await walk(root, '');
       return out;
     },
     async readUrls(entries) {
@@ -436,7 +480,11 @@ export async function diagnose(storage) {
     }
   }
   if (storage.checkRegistry) await run('Table « souvenirs » (base de données)', () => storage.checkRegistry());
-  await run('Liste des souvenirs', async () => `${(await storage.list()).filter((e) => isValidPathname(e.pathname)).length} en ligne`);
+  await run('Liste des souvenirs', async () => {
+    const media = (await storage.list()).filter((e) => isMediaPathname(e.pathname));
+    const manual = media.filter((e) => !isValidPathname(e.pathname)).length;
+    return `${media.length} photo(s)/vidéo(s) trouvée(s)` + (manual ? `, dont ${manual} déposée(s) à la main` : '');
+  });
   if (written) await run('Nettoyage du fichier test', () => storage.remove(testPath));
   return { ok: steps.every((s) => s.ok), steps };
 }

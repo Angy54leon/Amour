@@ -294,6 +294,16 @@
     );
   }
 
+  /** HEIC en ligne → JPEG local (blob:), pour les navigateurs sans HEIC. */
+  async function remoteHeicToJpegUrl(item) {
+    const res = await fetch(item.src);
+    if (!res.ok) throw new Error('lecture impossible');
+    const heic2any = await loadHeicConverter();
+    let out = await heic2any({ blob: await res.blob(), toType: 'image/jpeg', quality: 0.88 });
+    if (Array.isArray(out)) out = out[0];
+    return URL.createObjectURL(out);
+  }
+
   /* ---------- Version hébergée ---------- */
 
   async function loadManifest() {
@@ -372,6 +382,7 @@
     entriesFromDrop,
     addEntries,
     makeItem,
+    remoteHeicToJpegUrl,
     loadManifest,
     urlFor,
     release,
