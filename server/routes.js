@@ -73,6 +73,7 @@ const routes = {
       ...s,
       role: s.configured ? roleOf(req) : null,
       maxFileBytes: storage ? storage.maxFileBytes : MAX_FILE_BYTES,
+      uploadMode: storage && storage.uploadMode ? storage.uploadMode : null,
     });
   },
 
@@ -143,9 +144,13 @@ const routes = {
       }
     }
 
-    // Vercel rappelle aussi cette route à la fin d'un envoi (signature vérifiée par le SDK).
-    const isBrowserTokenRequest = body && body.type === 'blob.generate-client-token';
-    if (isBrowserTokenRequest && (roleOf(req) !== 'admin' || !sameOrigin(req))) {
+    // Toute demande d'autorisation d'envoi exige le code administrateur. Seul le rappel
+    // de fin d'envoi envoyé par Vercel passe sans cookie : le SDK en vérifie la signature.
+    const isVercelCallback = body && body.type === 'blob.upload-completed';
+    if (isVercelCallback && storage.uploadMode === 'presigned') {
+      return send(res, 400, { error: 'Rappel non utilisé' });
+    }
+    if (!isVercelCallback && (roleOf(req) !== 'admin' || !sameOrigin(req))) {
       return send(res, 403, { error: 'Réservé au code administrateur' });
     }
     try {

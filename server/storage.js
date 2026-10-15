@@ -144,20 +144,52 @@ function vercelAdapter() {
       const { put } = await load();
       await put(pathname, text, { access, addRandomSuffix: false, allowOverwrite: true, contentType: 'text/plain' });
     },
+    /**
+     * Méthode d'envoi selon les identifiants fournis par Vercel :
+     *  - 'client-token' : BLOB_READ_WRITE_TOKEN présent (handleUpload / upload) ;
+     *  - 'presigned'    : connexion OIDC (BLOB_STORE_ID, sans jeton secret) —
+     *                     handleUploadPresigned / uploadPresigned.
+     * Dans les deux cas : un seul fichier autorisé, nom imposé, formats photo/vidéo,
+     * taille plafonnée, pas d'écrasement, validité 1 h.
+     */
+    uploadMode: process.env.BLOB_READ_WRITE_TOKEN ? 'client-token' : 'presigned',
     async handleUpload(req, body, authorize) {
-      const { handleUpload } = await import('@vercel/blob/client');
-      return handleUpload({
+      const rules = {
+        allowedContentTypes: Object.values(CONTENT_TYPES),
+        maximumSizeInBytes: MAX_FILE_BYTES,
+        addRandomSuffix: false,
+        allowOverwrite: false,
+        validUntil: Date.now() + 60 * 60 * 1000,
+      };
+      const client = await import('@vercel/blob/client');
+      if (this.uploadMode === 'client-token') {
+        return client.handleUpload({
+          body,
+          request: req,
+          onBeforeGenerateToken: async (pathname) => {
+            authorize(pathname);
+            return rules;
+          },
+        });
+      }
+      const { issueSignedToken } = await load();
+      return client.handleUploadPresigned({
         body,
         request: req,
-        onBeforeGenerateToken: async (pathname) => {
+        // Clé servant uniquement à vérifier les rappels de fin d'envoi : l'album n'en
+        // demande pas (il confirme chaque fichier avec head()), ces rappels sont refusés.
+        webhookPublicKey: process.env.BLOB_WEBHOOK_PUBLIC_KEY || 'rappels-non-utilises',
+        getSignedToken: async (pathname) => {
           authorize(pathname);
-          return {
-            allowedContentTypes: Object.values(CONTENT_TYPES),
-            maximumSizeInBytes: MAX_FILE_BYTES,
-            addRandomSuffix: false,
-            allowOverwrite: false,
-            validUntil: Date.now() + 60 * 60 * 1000,
-          };
+          const token = await issueSignedToken({
+            pathname,
+            operations: ['put'],
+            validUntil: rules.validUntil,
+            allowedContentTypes: rules.allowedContentTypes,
+            maximumSizeInBytes: rules.maximumSizeInBytes,
+          });
+          const { validUntil, ...urlOptions } = rules;
+          return { token, urlOptions: { ...urlOptions, validUntil: Math.min(validUntil, token.validUntil) } };
         },
       });
     },

@@ -319,6 +319,8 @@
       uploadFiles.appendChild(row);
     }
     const badge = row.lastChild;
+    // Un état final (✓ / ✗) n'est jamais remplacé par une progression tardive.
+    if (state === 'sending' && /file-state--(verifying|saved|already|failed)/.test(badge.className)) return;
     badge.className = 'file-state file-state--' + state;
     badge.textContent = FILE_STATES[state](detail);
     uploadFiles.hidden = false;

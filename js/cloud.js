@@ -239,7 +239,10 @@
 
   async function putBlob(pathname, item, onProgress, signal) {
     const client = await loadBlobClient();
-    await client.upload(pathname, item.file, {
+    // 'presigned' : projet connecté au Blob Store par OIDC (sans jeton secret).
+    const send = info && info.uploadMode === 'presigned' ? client.uploadPresigned : client.upload;
+    // La promesse ne se résout qu'une fois le fichier accepté et stocké par Vercel.
+    await send(pathname, item.file, {
       access: 'private',
       handleUploadUrl: 'api/televersement',
       contentType: contentTypeOf(item, pathname),
@@ -268,6 +271,12 @@
       return 'fichier trop volumineux pour le stockage';
     }
     if (/content type|allowedContentTypes|mime/i.test(msg)) return 'format refusé';
+    if (/store has been suspended/i.test(msg)) return 'stockage Vercel suspendu (limite gratuite dépassée ?) : voir Vercel → Usage';
+    if (/store does not exist/i.test(msg)) return 'Blob Store introuvable : reconnecte-le au projet dans Vercel → Storage';
+    if (/access denied/i.test(msg)) return 'accès refusé par Vercel Blob : vérifie la connexion du Blob Store au projet';
+    if (/\b(public|private)\b.*\baccess\b|\baccess\b.*\b(public|private)\b/i.test(msg)) {
+      return 'réglage d’accès du Blob Store différent (public/privé) : voir le guide';
+    }
     if (/quota|storage limit|limit exceeded|payment/i.test(msg)) return 'espace de stockage plein (limite de l’offre)';
     if (/403|administrateur|forbidden/i.test(msg)) return 'session expirée : reconnecte-toi avec le code administrateur';
     if (/network|fetch|connexion|Load failed/i.test(msg)) return 'connexion perdue';
@@ -336,14 +345,21 @@
         try {
           task.loaded = 0;
           await put(pathname, item, (loaded) => {
+            // Le SDK peut émettre un dernier événement de progression après la fin :
+            // il ne doit jamais écraser « vérification… » ou « ✓ enregistré en ligne ».
+            if (task.transferred) return;
             task.loaded = loaded;
             onFile(item, 'sending', Math.min(99, Math.floor((loaded / item.size) * 100)));
             report();
           }, options.signal);
+          task.transferred = true;
           return;
         } catch (err) {
           if (options.signal && options.signal.aborted) throw err;
-          if (isAlreadyThere(err)) return; // déjà stocké : la confirmation tranchera
+          if (isAlreadyThere(err)) {
+            task.transferred = true;
+            return; // déjà stocké : la confirmation tranchera
+          }
           const reason = humanError(err);
           const retryable = reason === 'connexion perdue' || (err.status && err.status >= 500);
           if (attempt < RETRIES && retryable) {

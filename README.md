@@ -236,21 +236,54 @@ Pour un album avec des vidéos, Vercel Blob reste l'option la plus simple.
 
 ### Mise en place (une seule fois)
 
-1. **Créer le stockage** : sur vercel.com, ouvre ton projet → onglet **Storage** →
-   **Create** → **Blob**. Choisis l'accès **Private**, puis connecte-le au projet pour tous
-   les environnements. Vercel ajoute tout seul la variable `BLOB_READ_WRITE_TOKEN`.
-2. **Ajouter les codes** : ouvre **Settings → Environment Variables**, puis ajoute pour
-   Production (et Preview si tu l'utilises) :
+Comment le site utilise Vercel Blob :
+- **Envoi** : le navigateur envoie chaque fichier directement à Vercel Blob (« client
+  upload » du SDK officiel `@vercel/blob`), en plusieurs morceaux à partir de 8 Mo, avec
+  reprise automatique. Les fichiers ne passent pas par les fonctions Vercel, donc la limite
+  de 4,5 Mo de leur corps de requête ne s'applique pas.
+- **Autorisation d'envoi** : la fonction `api/televersement` délivre une autorisation
+  limitée à un seul fichier, à un nom imposé, aux formats photo/vidéo, à 1 Go, sans
+  écrasement possible et valable 1 h. Elle n'est délivrée qu'avec le code administrateur.
+- **Confirmation** : un fichier n'est compté qu'après l'acceptation par Vercel, puis la
+  vérification serveur `head()` (fichier présent et bonne taille, via `api/confirmer`).
+- **Liste** : `list({ prefix: 'souvenirs/' })` relit le contenu réel du Blob Store. Les
+  informations d'affichage (date, nom) sont rangées dans le nom du fichier, donc aucune base
+  de données n'est nécessaire et la liste ne peut pas diverger du stockage.
+- **Lecture** : uniquement par liens signés temporaires (`presignUrl`, 24 h au maximum).
+
+Étapes dans Vercel :
+
+1. **Connecter le Blob Store au projet** : Vercel → **Storage** → ton Blob Store →
+   **Projects** (ou **Connect Project**) → choisis « L'amour des deux zigs », coche
+   **Production** et **Preview**, puis garde le préfixe proposé **`BLOB`**. Vercel ajoute
+   alors l'accès au stockage, sous l'une de ces deux formes (le site gère les deux) :
+   - `BLOB_READ_WRITE_TOKEN` (jeton classique) ;
+   - `BLOB_STORE_ID` (connexion OIDC sans jeton secret ; Vercel fournit le reste à
+     l'exécution).
+
+   Vérifie dans **Settings → Environment Variables** que l'une des deux apparaît. Si tu
+   as choisi un autre préfixe, la variable aura un autre nom et le site ne la trouvera pas :
+   reconnecte avec `BLOB`.
+2. **Accès privé** : dans les réglages du Blob Store, l'accès doit être **Private**. Si ton
+   store est public, l'envoi affichera « réglage d'accès du Blob Store différent ». Le plus
+   sûr est alors de créer un nouveau store **Private** et de le connecter à la place, pour
+   que les photos ne soient jamais accessibles par une URL publique.
+3. **Ajouter les codes** : dans **Settings → Environment Variables**, ajoute pour
+   Production (et Preview) :
    - `ALBUM_CODE` : le code pour elle, par exemple une phrase qui vous ressemble ;
    - `ADMIN_CODE` : ton code à toi, différent du premier ;
-   - `SESSION_SECRET` : une longue suite de caractères au hasard, par exemple 64 caractères.
+   - `SESSION_SECRET` : une longue suite de caractères au hasard (64 environ),
+     **obligatoire** si Vercel a fourni `BLOB_STORE_ID` plutôt qu'un jeton.
 
-   Majuscules, accents et espaces en trop sont tolérés à la saisie.
-3. **Redéployer** : pousse le code, ou lance **Deployments → Redeploy** sur le dernier
-   déploiement de la bonne branche. Les variables ne s'appliquent qu'aux nouveaux déploiements.
-4. **Vérifier** : ouvre `https://<ton-site>.vercel.app/api/session`. Tu dois voir
-   `"configured":true` et `"storage":"vercel-blob"`. Si `missing` n'est pas vide, la liste
-   indique ce qu'il manque.
+   Coche **Sensitive** pour ces trois variables. Majuscules, accents et espaces en trop
+   sont tolérés à la saisie des codes.
+4. **Redéployer** : **Deployments** → dernier déploiement de la branche de production →
+   **⋯ → Redeploy**. Les variables ne s'appliquent qu'aux nouveaux déploiements.
+5. **Vérifier** : ouvre `https://<ton-site>.vercel.app/api/session`. Tu dois voir
+   `"configured":true`, `"storage":"vercel-blob"` et `"uploadMode":"client-token"` ou
+   `"presigned"`. Si `missing` n'est pas vide, la liste indique ce qu'il manque.
+6. **Tester** : sur l'iPhone, entre ton `ADMIN_CODE`, vérifie que le bandeau est vert, puis
+   touche « 🔎 Tester la sauvegarde en ligne ». Toutes les étapes doivent afficher ✓.
 
 ### Envoyer les souvenirs depuis l'iPhone
 

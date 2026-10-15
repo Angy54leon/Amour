@@ -12,7 +12,7 @@ import { projectRoot } from './medias.mjs';
 const out = path.join(projectRoot, 'js/vendor/blob-client.js');
 await build({
   stdin: {
-    contents: "export { upload } from '@vercel/blob/client';",
+    contents: "export { upload, uploadPresigned } from '@vercel/blob/client';",
     resolveDir: projectRoot,
     loader: 'js',
   },
