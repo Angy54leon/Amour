@@ -30,12 +30,28 @@
   </header>
 
   <main>
+    <!-- Code secret (album en ligne privé) -->
+    <section class="screen setup lock" id="screen-lock" hidden>
+      <form class="setup-card lock-card" id="lock-form" autocomplete="on">
+        <p class="setup-kicker">Album privé</p>
+        <h2 class="setup-title">Nos souvenirs</h2>
+        <p class="setup-text">Entre le code secret pour ouvrir l'album 💌</p>
+        <input type="text" name="username" value="album" autocomplete="username" hidden>
+        <input class="lock-input" id="lock-code" name="password" type="password" required
+          autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false"
+          placeholder="Code secret" aria-label="Code secret">
+        <button type="submit" class="soft-btn soft-btn--primary soft-btn--big" id="lock-submit">Ouvrir l'album 🔓</button>
+        <p class="lock-error" id="lock-error" aria-live="polite"></p>
+        <button type="button" class="link-btn" id="lock-local">Utiliser seulement les photos de cet appareil</button>
+      </form>
+    </section>
+
     <!-- 0. Préparation (pour toi uniquement, avant de lui montrer) -->
     <section class="screen setup" id="screen-setup" hidden>
       <div class="setup-card">
         <p class="setup-kicker">Avant la surprise</p>
         <h2 class="setup-title">Nos souvenirs</h2>
-        <p class="setup-text">
+        <p class="setup-text" id="setup-text">
           Choisis vos photos et vidéos. Elles sont lues directement par ton navigateur&nbsp;:
           rien n'est envoyé sur Internet.
         </p>
@@ -54,6 +70,32 @@
 
         <div class="drop-zone" id="drop-zone" hidden>
           <span>…ou glisse le dossier ici</span>
+        </div>
+
+        <!-- Album en ligne (visible quand le stockage est configuré et qu'on est connecté) -->
+        <div class="cloud" id="cloud-panel" hidden>
+          <div class="cloud-head">
+            <span class="cloud-badge">☁️ Album en ligne privé</span>
+            <span class="cloud-count" id="cloud-count"></span>
+          </div>
+          <p class="cloud-note" id="cloud-note"></p>
+          <div class="upload" id="upload-box" hidden>
+            <div class="upload-bar" aria-hidden="true"><span class="upload-fill" id="upload-fill"></span></div>
+            <p class="upload-text" id="upload-text" aria-live="polite"></p>
+            <p class="upload-current" id="upload-current"></p>
+            <p class="upload-tip">Garde Safari ouvert et l'écran allumé pendant l'envoi.</p>
+            <button type="button" class="link-btn" id="upload-stop">Arrêter l'envoi</button>
+          </div>
+          <details class="setup-skipped" id="upload-failed" hidden>
+            <summary></summary>
+            <ul></ul>
+          </details>
+          <button type="button" class="soft-btn" id="upload-send" hidden></button>
+          <details class="cloud-manage" id="cloud-manage" hidden>
+            <summary>Gérer les souvenirs en ligne</summary>
+            <ul class="cloud-list" id="cloud-list"></ul>
+          </details>
+          <button type="button" class="link-btn" id="cloud-logout">Se déconnecter de cet appareil</button>
         </div>
 
         <div class="setup-status" id="setup-status" aria-live="polite"></div>
@@ -140,6 +182,7 @@
   <script src="js/hearts.js"></script>
   <script src="js/library.js"></script>
   <script src="js/storage.js"></script>
+  <script src="js/cloud.js"></script>
   <script src="js/playlist.js"></script>
   <script src="js/intro.js"></script>
   <script src="js/album.js"></script>

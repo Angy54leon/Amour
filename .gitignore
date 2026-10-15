@@ -4,3 +4,9 @@ souvenirs.json
 dist/
 node_modules/
 .DS_Store
+
+# Secrets locaux (vercel env pull) et stockage de test
+.env*.local
+.env
+stockage-test/
+.vercel

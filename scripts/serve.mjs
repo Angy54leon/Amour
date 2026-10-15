@@ -8,6 +8,11 @@
  * Usage : npm start            (port 8080)
  *         PORT=3000 npm start
  *         node scripts/serve.mjs dist   (sert un autre dossier)
+ *
+ * Album en ligne : les routes /api/* (mêmes fichiers que sur Vercel) sont
+ * actives si un stockage est configuré, via les variables d'environnement ou un
+ * fichier .env.local (ex. `npx vercel env pull .env.local`). Pour tester sans
+ * Vercel : STOCKAGE_LOCAL=./stockage-test ALBUM_CODE=… ADMIN_CODE=… npm start
  */
 import { createServer } from 'node:http';
 import { createReadStream, promises as fs } from 'node:fs';
@@ -18,6 +23,21 @@ import { fileURLToPath } from 'node:url';
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const root = path.resolve(projectRoot, process.argv[2] || '.');
 const port = Number(process.env.PORT) || 8080;
+
+// Variables de .env.local (sans écraser celles déjà définies).
+try {
+  const env = await fs.readFile(path.join(projectRoot, '.env.local'), 'utf8');
+  for (const line of env.split(/\r?\n/)) {
+    const m = /^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/.exec(line);
+    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^(['"])(.*)\1$/, '$2');
+  }
+} catch {
+  /* pas de .env.local : normal */
+}
+
+const { route, ROUTE_NAMES } = await import('../server/routes.js');
+const { getStorage } = await import('../server/storage.js');
+const apiHandlers = Object.fromEntries(ROUTE_NAMES.map((name) => [name, route(name)]));
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -45,6 +65,16 @@ const TYPES = {
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
+    const api = /^\/api\/([a-z]+)\/?$/.exec(url.pathname);
+    if (api) {
+      const handler = getStorage() && apiHandlers[api[1]];
+      if (!handler) {
+        res.writeHead(404, { 'Content-Type': 'application/json' }).end('{"error":"Introuvable"}');
+        return;
+      }
+      await handler(req, res);
+      return;
+    }
     let rel = decodeURIComponent(url.pathname);
     if (rel.endsWith('/')) rel += 'index.html';
     const file = path.resolve(root, '.' + rel);
@@ -113,5 +143,7 @@ server.listen(port, '0.0.0.0', () => {
   console.log(`  Sur cet ordinateur :  http://localhost:${port}`);
   for (const ip of lan) console.log(`  Sur l'iPhone (même Wi-Fi) :  http://${ip}:${port}`);
   console.log(`\n  Dossier servi : ${root}`);
+  const storage = getStorage();
+  console.log(storage ? `  Album en ligne : stockage ${storage.kind}` : '  Album en ligne : non configuré (import local uniquement)');
   console.log('  Ctrl+C pour arrêter.\n');
 });

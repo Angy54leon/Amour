@@ -3,3 +3,5 @@ nos-souvenirs/
 souvenirs.json
 dist/
 node_modules/
+stockage-test/
+.env*

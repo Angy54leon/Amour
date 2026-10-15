@@ -464,6 +464,184 @@ body.is-importing .setup-actions .soft-btn {
   color: rgba(74, 42, 51, 0.72);
 }
 
+/* Code secret ---------------------------------------------------------- */
+
+.lock-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.lock-card .setup-text {
+  margin-bottom: 1.2rem;
+}
+
+.lock-input {
+  width: min(100%, 340px);
+  min-height: 52px;
+  margin-bottom: 14px;
+  padding: 0.7em 1.1em;
+  border: 1.5px solid rgba(138, 42, 66, 0.25);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 16px; /* 16 px : Safari iOS ne zoome pas sur le champ */
+  text-align: center;
+  letter-spacing: 0.04em;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.lock-input:focus {
+  border-color: var(--rose-deep);
+  box-shadow: 0 0 0 4px rgba(201, 103, 124, 0.18);
+}
+
+.lock-error {
+  min-height: 1.4em;
+  margin: 0.8rem 0 0;
+  font-family: var(--font-ui);
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--wine);
+}
+
+/* Album en ligne -------------------------------------------------------- */
+
+.cloud {
+  margin-top: 1.2rem;
+  padding: 16px 16px 8px;
+  border-radius: 20px;
+  background: rgba(243, 203, 210, 0.22);
+  border: 1px solid rgba(201, 103, 124, 0.18);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.cloud-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px 12px;
+  font-family: var(--font-ui);
+}
+
+.cloud-badge {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--rose-deep);
+}
+
+.cloud-count {
+  font-family: var(--font-serif);
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--wine);
+}
+
+.cloud-note {
+  margin: 0;
+  max-width: 30em;
+  font-family: var(--font-ui);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: rgba(74, 42, 51, 0.75);
+}
+
+.upload {
+  width: 100%;
+}
+
+.upload-bar {
+  height: 8px;
+  border-radius: 8px;
+  background: rgba(138, 42, 66, 0.12);
+  overflow: hidden;
+}
+
+.upload-fill {
+  display: block;
+  height: 100%;
+  background: var(--btn-gradient);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.3s ease;
+}
+
+.upload-text {
+  margin: 0.6rem 0 0.2rem;
+  font-family: var(--font-ui);
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--wine);
+  font-variant-numeric: tabular-nums;
+}
+
+.upload-current,
+.upload-tip {
+  margin: 0.2rem 0;
+  font-family: var(--font-ui);
+  font-size: 0.78rem;
+  color: rgba(74, 42, 51, 0.7);
+  word-break: break-word;
+}
+
+.cloud-manage {
+  width: 100%;
+  font-family: var(--font-ui);
+  font-size: 0.85rem;
+  color: rgba(74, 42, 51, 0.85);
+  text-align: left;
+}
+
+.cloud-manage summary {
+  cursor: pointer;
+  text-align: center;
+  padding: 0.4em;
+}
+
+.cloud-list {
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cloud-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 2px;
+  border-bottom: 1px solid rgba(201, 103, 124, 0.15);
+  word-break: break-word;
+}
+
+.cloud-del {
+  flex: none;
+  min-height: 36px;
+  padding: 0.3em 0.9em;
+  border: 1px solid rgba(138, 42, 66, 0.3);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--wine);
+  font-family: var(--font-ui);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cloud-del:disabled {
+  opacity: 0.5;
+}
+
 /* 1. Accueil ------------------------------------------------------------ */
 
 .intro {
@@ -1191,4 +1369,8 @@ body.is-switching .veil {
   to {
     opacity: 1;
   }
+}
+
+.cloud .link-btn {
+  margin-top: 0;
 }

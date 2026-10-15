@@ -5,9 +5,11 @@
   const U = A.utils;
   const L = A.library;
   const S = A.storage;
+  const C = A.cloud;
   const $ = (id) => document.getElementById(id);
 
   const screens = {
+    lock: $('screen-lock'),
     setup: $('screen-setup'),
     intro: $('screen-intro'),
     album: $('screen-album'),
@@ -21,6 +23,9 @@
   let hosted = false;
   let keepLocal = false;
   let switching = false;
+  // Album en ligne : null (désactivé), 'viewer' (voir) ou 'admin' (voir + envoyer)
+  let cloudRole = null;
+  let onlineItems = [];
 
   /* ---------- Écrans ---------- */
 
@@ -107,7 +112,10 @@
     const videos = collection.length - photos;
     ready.hidden = collection.length === 0;
     summary.textContent = `${plural(photos, 'photo', 'photos')} · ${plural(videos, 'vidéo', 'vidéos')} prêtes 💞`;
-    startBtn.disabled = collection.length === 0;
+    startBtn.disabled = collection.length === 0 || !!uploadCtrl;
+    // En ligne, « Tout retirer » ne concerne que les fichiers de cet appareil.
+    clearBtn.hidden = !!cloudRole && !collection.some((it) => !it.remote);
+    keepBlock.hidden = !S.supported() || (!!cloudRole && !keepLocal);
 
     skippedBox.hidden = skippedAll.length === 0;
     if (skippedAll.length) {
@@ -128,6 +136,239 @@
     document.body.classList.toggle('is-importing', busy);
     startBtn.disabled = busy || collection.length === 0;
     pickFiles.disabled = pickFolder.disabled = busy;
+  }
+
+  /* ---------- Album en ligne ---------- */
+
+  const setupText = $('setup-text');
+  const cloudPanel = $('cloud-panel');
+  const cloudCount = $('cloud-count');
+  const cloudNote = $('cloud-note');
+  const uploadBox = $('upload-box');
+  const uploadFill = $('upload-fill');
+  const uploadText = $('upload-text');
+  const uploadCurrent = $('upload-current');
+  const uploadStop = $('upload-stop');
+  const uploadFailed = $('upload-failed');
+  const uploadSend = $('upload-send');
+  const cloudManage = $('cloud-manage');
+  const cloudList = $('cloud-list');
+  const cloudLogout = $('cloud-logout');
+  let uploadCtrl = null;
+  let lastFailed = [];
+
+  function formatBytes(n) {
+    if (n >= 1e9) return (n / 1e9).toFixed(2).replace('.', ',') + ' Go';
+    if (n >= 1e6) return (n / 1e6).toFixed(1).replace('.', ',') + ' Mo';
+    return Math.max(1, Math.round(n / 1e3)) + ' Ko';
+  }
+
+  function pendingLocal() {
+    return collection.filter((it) => it.file && !it.remote);
+  }
+
+  function renderCloud() {
+    cloudPanel.hidden = !cloudRole;
+    if (!cloudRole) return;
+    const admin = cloudRole === 'admin';
+    cloudCount.textContent = plural(onlineItems.length, 'souvenir', 'souvenirs') + ' en ligne';
+    cloudNote.textContent = admin
+      ? 'Les photos et vidéos que tu ajoutes sont envoyées automatiquement dans votre album privé, visible seulement avec un code.'
+      : 'Tu vois l’album partagé. Les photos ajoutées ici restent sur cet appareil.';
+    setupText.textContent = admin
+      ? 'Ajoute vos photos et vidéos : elles rejoignent l’album en ligne et seront les mêmes sur tous vos appareils.'
+      : 'Voici votre album partagé 💞';
+
+    const pending = admin ? pendingLocal() : [];
+    uploadSend.hidden = !admin || !!uploadCtrl || pending.length === 0;
+    uploadSend.textContent = `☁️ Envoyer en ligne (${pending.length})`;
+
+    uploadFailed.hidden = !admin || lastFailed.length === 0;
+    if (lastFailed.length) {
+      uploadFailed.querySelector('summary').textContent =
+        plural(lastFailed.length, 'envoi a échoué', 'envois ont échoué') + ' — touche « Envoyer en ligne » pour réessayer';
+      const list = uploadFailed.querySelector('ul');
+      list.textContent = '';
+      for (const f of lastFailed) {
+        const li = document.createElement('li');
+        li.textContent = `${f.item.name} — ${f.reason}`;
+        list.appendChild(li);
+      }
+    }
+
+    cloudManage.hidden = !admin || onlineItems.length === 0;
+    if (cloudManage.open) renderManageList();
+  }
+
+  function renderManageList() {
+    cloudList.textContent = '';
+    for (const item of onlineItems) {
+      const li = document.createElement('li');
+      const label = document.createElement('span');
+      label.textContent = `${item.kind === 'video' ? '🎬' : '🖼️'} ${item.name} · ${formatBytes(item.size)}`;
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'cloud-del';
+      del.textContent = 'Supprimer';
+      del.setAttribute('aria-label', 'Supprimer ' + item.name);
+      del.addEventListener('click', async () => {
+        if (!window.confirm(`Supprimer définitivement « ${item.name} » de l’album en ligne ?`)) return;
+        del.disabled = true;
+        try {
+          await C.remove(item.pathname);
+          onlineItems = onlineItems.filter((it) => it !== item);
+          collection = collection.filter((it) => it !== item);
+          status.textContent = `« ${item.name} » supprimé de l’album en ligne.`;
+        } catch (err) {
+          status.textContent = 'Suppression impossible : ' + err.message;
+          del.disabled = false;
+        }
+        renderSummary();
+        renderCloud();
+      });
+      li.append(label, del);
+      cloudList.appendChild(li);
+    }
+  }
+
+  function renderUploadProgress(p) {
+    const ratio = p.totalBytes ? p.loadedBytes / p.totalBytes : p.total ? p.done / p.total : 0;
+    uploadFill.style.transform = `scaleX(${Math.min(1, ratio)})`;
+    uploadText.textContent =
+      `Envoi : ${Math.floor(ratio * 100)} % — ${p.done} / ${p.total} fichiers · ` +
+      `${formatBytes(p.loadedBytes)} / ${formatBytes(p.totalBytes)}`;
+    uploadCurrent.textContent = p.current.length ? 'En cours : ' + p.current.join(', ') : '';
+  }
+
+  /** Envoie en ligne tous les fichiers locaux pas encore envoyés. */
+  async function uploadPending() {
+    if (cloudRole !== 'admin' || uploadCtrl) return;
+    const pending = pendingLocal();
+    if (!pending.length) return;
+    uploadCtrl = new AbortController();
+    lastFailed = [];
+    uploadBox.hidden = false;
+    uploadFill.style.transform = 'scaleX(0)';
+    uploadText.textContent = 'Préparation de l’envoi…';
+    uploadCurrent.textContent = '';
+    setBusy(true);
+    renderCloud();
+    await C.keepAwake(true);
+    const existing = new Set(onlineItems.map((it) => it.pathname));
+    try {
+      const res = await C.uploadAll(pending, { existing, signal: uploadCtrl.signal, onProgress: renderUploadProgress });
+      lastFailed = res.failed;
+      onlineItems = await C.list();
+      const online = new Set(onlineItems.map((it) => it.pathname));
+      const uploaded = pending.filter((it) => it.pathname && online.has(it.pathname));
+      L.releaseAll(uploaded);
+      collection = onlineItems.concat(collection.filter((it) => !it.remote && uploaded.indexOf(it) === -1));
+      const parts = [];
+      if (res.sent.length) parts.push(`${plural(res.sent.length, 'souvenir envoyé', 'souvenirs envoyés')} en ligne ☁️`);
+      if (res.skipped) parts.push(`${res.skipped} déjà en ligne`);
+      if (res.failed.length) parts.push(`${res.failed.length} en échec`);
+      if (res.aborted) parts.unshift('Envoi arrêté');
+      status.textContent = parts.join(' · ') || 'Rien à envoyer.';
+    } catch (err) {
+      status.textContent = 'L’envoi a échoué : ' + (err.message || 'erreur inconnue') + '. Réessaie.';
+      console.error(err);
+    } finally {
+      uploadCtrl = null;
+      await C.keepAwake(false);
+      uploadBox.hidden = true;
+      setBusy(false);
+      renderSummary();
+      renderCloud();
+    }
+  }
+
+  uploadSend.addEventListener('click', uploadPending);
+  uploadStop.addEventListener('click', () => uploadCtrl && uploadCtrl.abort());
+  cloudManage.addEventListener('toggle', () => cloudManage.open && renderManageList());
+  cloudLogout.addEventListener('click', async () => {
+    if (uploadCtrl) return;
+    await C.logout();
+    location.reload();
+  });
+  window.addEventListener('beforeunload', (e) => {
+    if (uploadCtrl) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+
+  /** Connecté : charge l'album en ligne et ouvre l'écran adapté. */
+  async function enterCloud(role) {
+    cloudRole = role;
+    try {
+      onlineItems = await C.list();
+    } catch (err) {
+      if (err.status === 401) {
+        cloudRole = null;
+        return showLock('Ta session a expiré, entre à nouveau le code.');
+      }
+      onlineItems = [];
+      status.textContent = 'Impossible de charger l’album en ligne pour le moment : ' + err.message;
+    }
+    collection = onlineItems.slice();
+    if (role === 'viewer' && collection.length) {
+      intro.reset();
+      show('intro'); // pour elle : directement la surprise
+      return;
+    }
+    show('setup');
+    if (role === 'admin') await restoreFromDevice(); // souvenirs gardés sur l'iPhone → à envoyer
+    renderSummary();
+    renderCloud();
+    if (role === 'viewer' && !collection.length) status.textContent = 'L’album en ligne est encore vide.';
+  }
+
+  /* ---------- Code secret ---------- */
+
+  const lockForm = $('lock-form');
+  const lockCode = $('lock-code');
+  const lockError = $('lock-error');
+  const lockSubmit = $('lock-submit');
+
+  function showLock(message) {
+    lockError.textContent = message || '';
+    show('lock');
+  }
+
+  lockForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    lockSubmit.disabled = true;
+    lockError.textContent = '';
+    try {
+      const role = await C.login(lockCode.value);
+      lockCode.value = '';
+      await throughVeil(() => enterCloud(role));
+    } catch (err) {
+      lockError.textContent = err.message || 'Connexion impossible';
+      lockCode.select();
+    } finally {
+      lockSubmit.disabled = false;
+    }
+  });
+
+  $('lock-local').addEventListener('click', () => {
+    throughVeil(async () => {
+      show('setup');
+      renderSummary();
+      await restoreFromDevice();
+    });
+  });
+
+  /** Lien partagé : https://…/#code=… (le fragment n'est jamais envoyé au serveur). */
+  function codeFromLink() {
+    const m = /(?:^#|&)code=([^&]+)/.exec(location.hash);
+    if (!m) return null;
+    history.replaceState(null, '', location.pathname + location.search);
+    try {
+      return decodeURIComponent(m[1].replace(/\+/g, ' '));
+    } catch (_) {
+      return null;
+    }
   }
 
   let importing = false;
@@ -160,7 +401,9 @@
       importing = false;
       setBusy(false);
       renderSummary();
+      renderCloud();
     }
+    if (cloudRole === 'admin') await uploadPending();
   }
 
   async function saveToDevice() {
@@ -231,12 +474,15 @@
 
   clearBtn.addEventListener('click', async () => {
     if (keepLocal && !window.confirm('Retirer tous les souvenirs, y compris ceux gardés sur cet appareil ?')) return;
-    L.releaseAll(collection);
-    if (keepLocal) await S.clear(collection).catch(() => {});
-    collection = [];
+    const local = collection.filter((it) => !it.remote);
+    L.releaseAll(local);
+    if (keepLocal) await S.clear(local).catch(() => {});
+    collection = collection.filter((it) => it.remote); // l'album en ligne n'est pas touché
     skippedAll = [];
+    lastFailed = [];
     status.textContent = '';
     renderSummary();
+    renderCloud();
   });
 
   startBtn.addEventListener('click', () => {
@@ -252,7 +498,7 @@
     try {
       const items = await S.loadItems();
       if (!items.length) return;
-      collection = items;
+      collection = collection.filter((it) => it.remote).concat(items);
       keepLocal = true;
       status.textContent = `${plural(items.length, 'souvenir retrouvé', 'souvenirs retrouvés')} sur cet appareil 💾`;
       keepNote.textContent = 'Gardés dans ce navigateur, sur cet appareil uniquement. Décoche pour les effacer.';
@@ -274,6 +520,7 @@
       const r = happyBtn.getBoundingClientRect();
       throughVeil(
         async () => {
+          await refreshOnlineUrlsIfNeeded();
           show('album');
           await U.nextFrame();
           album.start(A.playlist.build(collection));
@@ -303,6 +550,11 @@
     },
   });
 
+  /** Les liens signés expirent après ~1 jour : on les renouvelle avant de relancer. */
+  async function refreshOnlineUrlsIfNeeded() {
+    if (cloudRole && C.urlsMayHaveExpired()) await C.refreshUrls(collection).catch(() => {});
+  }
+
   /* ---------- Fin ---------- */
 
   const ending = $('ending-message');
@@ -318,6 +570,7 @@
 
   replayBtn.addEventListener('click', () => {
     throughVeil(async () => {
+      await refreshOnlineUrlsIfNeeded();
       show('album');
       await U.nextFrame();
       album.start(A.playlist.build(collection)); // nouvel ordre surprise
@@ -347,6 +600,21 @@
       show('intro');
       return;
     }
+    // Album en ligne (Vercel Blob privé) si le serveur est configuré.
+    const online = await C.status();
+    if (online && online.configured) {
+      const code = codeFromLink();
+      let linkError = '';
+      if (code) {
+        try {
+          await C.login(code);
+        } catch (err) {
+          linkError = err.message;
+        }
+      }
+      if (C.info.role) return enterCloud(C.info.role);
+      return showLock(linkError);
+    }
     show('setup');
     renderSummary();
     await restoreFromDevice();
@@ -360,6 +628,12 @@
     },
     get hosted() {
       return hosted;
+    },
+    get cloudRole() {
+      return cloudRole;
+    },
+    get onlineItems() {
+      return onlineItems;
     },
   };
 

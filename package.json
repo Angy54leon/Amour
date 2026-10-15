@@ -7,9 +7,17 @@
     "start": "node scripts/serve.mjs",
     "liste": "node scripts/generer-liste.mjs",
     "build": "node scripts/build.mjs",
-    "build:site": "node scripts/build.mjs --sans-medias"
+    "build:site": "node scripts/build.mjs --sans-medias",
+    "vendor:blob": "node scripts/vendor-blob.mjs"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
+  },
+  "type": "module",
+  "dependencies": {
+    "@vercel/blob": "2.8.2"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
   }
 }

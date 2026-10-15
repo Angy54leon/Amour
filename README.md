@@ -80,6 +80,7 @@ affichage plein écran.
 | Import simple (par défaut) | En mémoire, dans l'onglet | **Perdus** à la fermeture ou au rechargement de la page | Non |
 | Interrupteur **« Garder ces souvenirs sur cet appareil »** | Stockage du navigateur (IndexedDB), sur **ce** téléphone, dans **ce** navigateur | Jusqu'à ce que le navigateur les efface (voir ci-dessous) | Non |
 | **Version hébergée** (`npm run build`) | Sur l'hébergeur, avec le site | Tant que le site est en ligne | **Oui**, via le lien |
+| **Album en ligne privé** (Vercel Blob, voir § 3 bis) | Stockage Vercel Blob **privé** | Tant que tu ne les supprimes pas | **Oui**, avec le code |
 
 À propos de l'interrupteur « Garder sur cet appareil » :
 
@@ -118,6 +119,110 @@ lance `npm run liste` puis `npm start`. Tout appareil du réseau ouvre alors dir
 l'album. Ajoute `?ajouter` à l'adresse pour revenir à l'écran d'import.
 
 ---
+
+## 3 bis. Album en ligne privé (Vercel Blob) — recommandé
+
+Tu envoies tes photos et vidéos **depuis l'iPhone**, elles sont stockées en ligne, et le même
+album s'affiche sur **tous les appareils** : iPhone, PC, téléphone de ta copine.
+
+### Comment c'est protégé
+
+- Le magasin Vercel Blob est **privé** : aucun fichier n'a d'adresse publique.
+- On entre dans l'album avec un **code** :
+  - `ALBUM_CODE`, à lui donner : il permet de **voir** l'album ;
+  - `ADMIN_CODE`, à garder pour toi : il permet de voir, **envoyer** et **supprimer**.
+- Le serveur vérifie le code, puis pose un cookie de session signé (`HttpOnly`). Les médias
+  sont ensuite lus par des **liens signés qui expirent** au bout de 24 h au maximum.
+- **Aucune clé secrète dans le navigateur.** Le jeton `BLOB_READ_WRITE_TOKEN` reste sur le
+  serveur. Pour chaque envoi, le téléphone reçoit un jeton temporaire limité à un seul
+  fichier, à un nom imposé et aux formats photo/vidéo.
+- Changer un code dans Vercel (puis redéployer) déconnecte les sessions ouvertes avec l'ancien.
+- Choisis des codes longs (une petite phrase). Les mauvais codes sont ralentis, mais le
+  site n'a pas de verrouillage après plusieurs essais.
+
+### Limites et coûts (vérifiés en octobre 2026, à reconfirmer sur vercel.com/pricing)
+
+- Offre **Hobby** (gratuite, usage personnel et non commercial), d'après la page de tarifs
+  de Vercel :
+  - **1 Go** de stockage Blob ;
+  - **10 Go** de transfert Blob par mois ;
+  - **10 000** opérations simples et **2 000** opérations avancées par mois (un envoi ou un
+    affichage de la liste = une opération avancée).
+- Ce que ça représente :
+  - un album d'environ 300 Mo tient dans le stockage ;
+  - regarder tout l'album consomme à peu près son poids en transfert (environ 30 visionnages
+    complets par mois pour 300 Mo) ;
+  - les grosses vidéos pèsent vite lourd.
+- En cas de dépassement sur Hobby, consulte l'onglet **Usage** : Vercel peut limiter le
+  service jusqu'au mois suivant ou proposer de passer à l'offre Pro, qui est payante.
+- Pourquoi pas Supabase Storage ? Il est aussi très bien, mais un projet gratuit se met en
+  pause après 7 jours d'inactivité. Avec Vercel Blob, ton site et tes fichiers restent au
+  même endroit, sans compte supplémentaire.
+
+### Mise en place (une seule fois)
+
+1. **Créer le stockage** : sur vercel.com, ouvre ton projet → onglet **Storage** →
+   **Create** → **Blob**. Choisis l'accès **Private**, puis connecte-le au projet pour tous
+   les environnements. Vercel ajoute tout seul la variable `BLOB_READ_WRITE_TOKEN`.
+2. **Ajouter les codes** : ouvre **Settings → Environment Variables**, puis ajoute pour
+   Production (et Preview si tu l'utilises) :
+   - `ALBUM_CODE` : le code pour elle, par exemple une phrase qui vous ressemble ;
+   - `ADMIN_CODE` : ton code à toi, différent du premier ;
+   - `SESSION_SECRET` : une longue suite de caractères au hasard, par exemple 64 caractères.
+
+   Majuscules, accents et espaces en trop sont tolérés à la saisie.
+3. **Redéployer** : pousse le code, ou lance **Deployments → Redeploy** sur le dernier
+   déploiement de la bonne branche. Les variables ne s'appliquent qu'aux nouveaux déploiements.
+4. **Vérifier** : ouvre `https://<ton-site>.vercel.app/api/session`. Tu dois voir
+   `"configured":true` et `"storage":"vercel-blob"`. Si `missing` n'est pas vide, la liste
+   indique ce qu'il manque.
+
+### Envoyer les souvenirs depuis l'iPhone
+
+1. Ouvre le site dans **Safari** et entre ton **ADMIN_CODE**.
+2. Touche **« Ajouter nos souvenirs »**, puis sélectionne tes photos et vidéos dans la
+   photothèque.
+3. L'envoi démarre tout seul. La barre de progression affiche le pourcentage, le nombre de
+   fichiers, les octets envoyés et les fichiers en cours.
+4. **Garde Safari ouvert et l'écran allumé** pendant l'envoi. Les gros fichiers partent en
+   plusieurs morceaux, qui sont relancés automatiquement en cas de coupure.
+5. Si des envois échouent, la liste des échecs s'affiche avec leur cause. Touche
+   **« Envoyer en ligne »** pour réessayer.
+6. Tu peux renvoyer la même sélection sans risque : les fichiers déjà en ligne sont reconnus
+   (empreinte du contenu) et ignorés.
+7. Les photos que tu avais choisies avant cette mise à jour ne sont pas restées dans le
+   site, sauf si tu avais activé « Garder ces souvenirs sur cet appareil » : dans ce cas,
+   un bouton **« Envoyer en ligne (N) »** les propose directement. Sinon, sélectionne-les
+   de nouveau dans ta photothèque, elles y sont toujours.
+8. Conseil : procède par lots d'environ 50 fichiers, en Wi-Fi.
+
+Pour retirer un souvenir : **« Gérer les souvenirs en ligne »** → **Supprimer**.
+
+### Le lien pour elle
+
+Envoie-lui `https://<ton-site>.vercel.app/#code=<ALBUM_CODE>`, en remplaçant les espaces
+par `%20`. Elle arrive directement sur « Tu veux voir le bonheur ? ».
+
+- Le code n'est jamais envoyé au serveur dans l'adresse, et il est effacé de la barre
+  d'adresse à l'ouverture.
+- Son appareil reste connecté pendant 6 mois.
+- Elle peut aussi ouvrir le site sans le code dans le lien et le taper.
+- ⚠️ Ce lien est une clé : toute personne qui l'a peut voir l'album.
+
+### Tester sur l'ordinateur sans Vercel
+
+```bash
+STOCKAGE_LOCAL=./stockage-test ALBUM_CODE="notre code" ADMIN_CODE="mon code" SESSION_SECRET=test npm start
+```
+
+Les fichiers sont alors rangés dans `stockage-test/` (ignoré par Git), avec exactement le
+même fonctionnement : codes, liens signés, progression.
+
+Pour utiliser le vrai stockage depuis ton PC : `npm install`, puis
+`npx vercel env pull .env.local`, puis `npm start`.
+
+Sans stockage configuré, le site fonctionne **exactement comme avant** : import local,
+« Garder sur cet appareil », version hébergée.
 
 ## 4. Formats pris en charge
 
@@ -170,6 +275,10 @@ css/style.css         direction artistique et animations
 js/utils.js           outils (hasard, tailles…)
 js/library.js         import des fichiers, contrôle, conversion HEIC, URL blob
 js/storage.js         option « Garder sur cet appareil » (IndexedDB)
+js/cloud.js           album en ligne : code, liste, envoi avec progression
+js/vendor/blob-client.js  client d'envoi @vercel/blob (généré : npm run vendor:blob)
+api/*.js              fonctions Vercel (session, connexion, souvenirs, envoi)
+server/               logique serveur : codes et sessions, stockage Blob privé
 js/playlist.js        mélange intelligent
 js/intro.js           le bouton qui esquive 3 fois
 js/album.js           lecteur, transitions, vidéos, gestes

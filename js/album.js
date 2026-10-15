@@ -258,7 +258,11 @@
         entry.media = img;
         entry.width = img.naturalWidth;
         entry.height = img.naturalHeight;
-        if (entry.ok) entry.ambient = ambientFrom(img, entry.width, entry.height);
+        if (entry.ok) {
+          // Photo en ligne (autre domaine) : le canvas est verrouillé par le navigateur,
+          // on floute alors directement la photo pour garder la même ambiance.
+          entry.ambient = ambientFrom(img, entry.width, entry.height) || (item.remote ? item.src : null);
+        }
       } else {
         video.muted = false;
         video.src = L.urlFor(item);
@@ -448,6 +452,17 @@
       index = i;
       updateCounter();
       keepUrls(i);
+
+      if (!entry.ok && item.remote && !item.refreshed && A.cloud) {
+        // Lien signé expiré (album resté ouvert longtemps) : on le renouvelle une fois.
+        item.refreshed = true;
+        try {
+          await A.cloud.refreshUrls(items);
+          return transitionTo(i, dir);
+        } catch (_) {
+          /* hors ligne : on passe au suivant */
+        }
+      }
 
       if (!entry.ok) {
         item.broken = true;
