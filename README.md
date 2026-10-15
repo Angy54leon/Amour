@@ -125,6 +125,81 @@ l'album. Ajoute `?ajouter` à l'adresse pour revenir à l'écran d'import.
 Tu envoies tes photos et vidéos **depuis l'iPhone**, elles sont stockées en ligne, et le même
 album s'affiche sur **tous les appareils** : iPhone, PC, téléphone de ta copine.
 
+### Mes souvenirs ont disparu après réouverture : que s'est-il passé ?
+
+Si l'album en ligne n'est pas **entièrement** configuré, le site ne peut rien enregistrer et
+utilise l'import local, qui garde les fichiers seulement dans l'onglet ouvert. Cela arrive si :
+- le stockage ou une variable manque (`ALBUM_CODE`, `ADMIN_CODE`, `SESSION_SECRET`) ;
+- le site n'a pas été redéployé après l'ajout des variables ;
+- une ancienne version est déployée.
+
+Jusqu'ici, rien ne te prévenait. Désormais, l'écran d'import affiche toujours un **bandeau
+d'état** :
+
+| Bandeau | Signification |
+|---|---|
+| ☁️ vert « Sauvegarde en ligne active » | Chaque fichier affiche « ✓ enregistré en ligne » une fois vérifié par le serveur |
+| ⚠️ orange « Sauvegarde en ligne non configurée… Il manque sur Vercel : … » | Ajoute les variables listées, puis redéploie |
+| ⚠️ orange « Le serveur de l'album ne répond pas (/api/session : erreur …) » | Le déploiement n'a pas de fonctions `/api`, ou elles plantent : redéploie la dernière version, puis consulte Vercel → **Logs** |
+| 👀 « code de l'album (lecture seule) » | Tu es connecté avec `ALBUM_CODE` : ce que tu ajoutes n'est pas sauvegardé. Touche « Changer de code » et utilise `ADMIN_CODE` |
+| 📱 « cet appareil uniquement » | Tu as choisi de ne rien envoyer en ligne |
+
+Vérification rapide : ouvre `https://<ton-site>.vercel.app/api/session`.
+- Une page 404 signifie que les fonctions ne sont pas déployées.
+- `"configured":false` : la liste `missing` dit ce qu'il manque.
+- `"configured":true` : tout est prêt.
+
+Une fois connecté avec `ADMIN_CODE`, le bouton **« 🔎 Tester la sauvegarde en ligne »** fait
+un vrai essai : écriture d'un fichier test, vérification, relecture par lien signé, accès à
+la base (Supabase), puis suppression. Chaque étape affiche ✓ ou ✗ avec le message exact.
+
+### Confirmation fichier par fichier
+
+Pendant l'envoi, chaque fichier passe par ces états : *en attente* → *envoi xx %* →
+*vérification…* → **✓ enregistré en ligne** (ou **✗ raison**).
+
+Le « ✓ » n'apparaît que lorsque le serveur a vérifié que le fichier est réellement présent
+dans le stockage, avec la bonne taille, et l'a inscrit dans l'album (route `/api/confirmer`).
+Après chaque envoi, la liste est relue depuis le serveur : c'est elle qui fait foi.
+
+### Option B : Supabase Storage + base de données
+
+Si tu préfères Supabase à Vercel Blob :
+- les fichiers vont dans un **bucket privé** ;
+- la liste des médias est tenue dans une **table `souvenirs`** : une ligne est ajoutée
+  seulement après vérification du fichier.
+
+1. Crée un projet sur supabase.com.
+2. Dans **SQL Editor**, colle et exécute `supabase/schema.sql`. Ce script crée le bucket
+   privé `souvenirs` et la table avec RLS : les clés publiques ne peuvent rien lire.
+3. Dans **Project Settings → API**, récupère :
+   - l'**URL** du projet ;
+   - la clé **secrète** (`service_role`, ou `sb_secret_…`). Elle ne va que sur Vercel, jamais
+     dans le code.
+4. Dans Vercel → **Settings → Environment Variables**, ajoute `SUPABASE_URL` et
+   `SUPABASE_SERVICE_ROLE_KEY`, plus `ALBUM_CODE`, `ADMIN_CODE` et `SESSION_SECRET`.
+   Ne garde **pas** `BLOB_READ_WRITE_TOKEN` en même temps : s'il est présent, Vercel Blob
+   est prioritaire.
+5. Redéploie, puis lance « 🔎 Tester la sauvegarde en ligne ».
+
+Limites à connaître (offre gratuite, à vérifier sur supabase.com/pricing) :
+- environ **1 Go** de stockage ;
+- **50 Mo maximum par fichier** par défaut : les longues vidéos d'iPhone peuvent dépasser,
+  et seront alors signalées « ✗ trop volumineux » ;
+- un projet gratuit est **mis en pause après 7 jours d'inactivité** : il faut alors le
+  réactiver dans le tableau de bord.
+
+Pour un album avec des vidéos, Vercel Blob reste l'option la plus simple.
+
+### Redéployer
+
+1. Pousse la dernière version de la branche suivie par Vercel (Settings → Git →
+   Production Branch).
+2. Après tout ajout ou changement de variable, lance **Deployments → ⋯ → Redeploy** sur le
+   **dernier** déploiement de cette branche : les variables ne s'appliquent qu'aux nouveaux
+   déploiements.
+3. Vérifie `/api/session`, puis le bouton « 🔎 Tester la sauvegarde en ligne ».
+
 ### Comment c'est protégé
 
 - Le magasin Vercel Blob est **privé** : aucun fichier n'a d'adresse publique.
@@ -278,7 +353,8 @@ js/storage.js         option « Garder sur cet appareil » (IndexedDB)
 js/cloud.js           album en ligne : code, liste, envoi avec progression
 js/vendor/blob-client.js  client d'envoi @vercel/blob (généré : npm run vendor:blob)
 api/*.js              fonctions Vercel (session, connexion, souvenirs, envoi)
-server/               logique serveur : codes et sessions, stockage Blob privé
+server/               logique serveur : codes et sessions, stockage (Vercel Blob ou Supabase), confirmation
+supabase/schema.sql   bucket privé + table « souvenirs » (option Supabase)
 js/playlist.js        mélange intelligent
 js/intro.js           le bouton qui esquive 3 fois
 js/album.js           lecteur, transitions, vidéos, gestes

@@ -33,13 +33,27 @@ function codes() {
 /** Clé de signature des sessions : jamais envoyée au navigateur. */
 function signingKey() {
   const base =
-    process.env.SESSION_SECRET || process.env.BLOB_READ_WRITE_TOKEN || process.env.STOCKAGE_LOCAL_SECRET;
+    process.env.SESSION_SECRET ||
+    process.env.BLOB_READ_WRITE_TOKEN ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    process.env.SUPABASE_SECRET_KEY ||
+    process.env.STOCKAGE_LOCAL_SECRET;
   return base ? sha256('amour-session:' + base) : null;
 }
 
-export function authConfigured() {
+/** Ce qui manque pour activer les codes (noms des variables, jamais leurs valeurs). */
+export function authProblems() {
   const c = codes();
-  return !!(c.admin && c.viewer && c.admin !== c.viewer && signingKey());
+  const problems = [];
+  if (!c.viewer) problems.push('ALBUM_CODE');
+  if (!c.admin) problems.push('ADMIN_CODE');
+  if (c.admin && c.viewer && c.admin === c.viewer) problems.push('ADMIN_CODE doit être différent de ALBUM_CODE');
+  if (!signingKey()) problems.push('SESSION_SECRET');
+  return problems;
+}
+
+export function authConfigured() {
+  return authProblems().length === 0;
 }
 
 /** Comparaison à temps constant (pas d'indice sur le code via le temps de réponse). */

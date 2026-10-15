@@ -26,6 +26,10 @@
   // Album en ligne : null (désactivé), 'viewer' (voir) ou 'admin' (voir + envoyer)
   let cloudRole = null;
   let onlineItems = [];
+  // Où vont réellement les photos ajoutées : affiché en permanence à l'import.
+  // 'cloud-admin' | 'cloud-viewer' | 'not-configured' | 'no-api' | 'local-chosen' | 'local'
+  let saveMode = 'local';
+  let saveMissing = [];
 
   /* ---------- Écrans ---------- */
 
@@ -231,11 +235,131 @@
     }
   }
 
+  /* ---------- État de la sauvegarde (toujours vrai, jamais optimiste) ---------- */
+
+  const saveState = $('save-state');
+  const saveStateText = $('save-state-text');
+  const saveStateAction = $('save-state-action');
+  const uploadFiles = $('upload-files');
+  const cloudTest = $('cloud-test');
+  const cloudTestResult = $('cloud-test-result');
+  let saveAction = null;
+
+  const SAVE_STATES = {
+    'cloud-admin': {
+      tone: 'ok',
+      text: () => '☁️ Sauvegarde en ligne active. Chaque photo ou vidéo affiche « ✓ enregistré en ligne » seulement quand le serveur a vérifié qu’elle est stockée.',
+    },
+    'cloud-viewer': {
+      tone: 'info',
+      text: () => '👀 Tu es connecté·e avec le code de l’album (lecture seule). Les photos ajoutées ici ne sont PAS sauvegardées en ligne. Pour enrichir l’album, utilise le code administrateur.',
+      action: ['Changer de code', () => switchCode()],
+    },
+    'not-configured': {
+      tone: 'warn',
+      text: () => '⚠️ Sauvegarde en ligne non configurée : les photos ajoutées ici restent seulement dans cet onglet et disparaîtront à la fermeture. Il manque sur Vercel : ' + (saveMissing.join(', ') || 'la configuration') + '.',
+    },
+    'no-api': {
+      tone: 'warn',
+      text: () =>
+        '⚠️ Le serveur de l’album ne répond pas (/api/session' +
+        (C.problemStatus ? ' : erreur ' + C.problemStatus : ' injoignable') +
+        ') : rien ne peut être sauvegardé en ligne, et les photos ajoutées ici disparaîtront à la fermeture. Redéploie la dernière version du projet, puis consulte Vercel → Logs.',
+    },
+    'local-chosen': {
+      tone: 'info',
+      text: () => '📱 Mode « cet appareil uniquement » : rien n’est envoyé en ligne.',
+      action: ['Revenir à l’album en ligne', () => showLock('')],
+    },
+    local: {
+      tone: 'info',
+      text: () => '📱 Les photos sont lues sur cet appareil uniquement : elles ne sont pas sauvegardées en ligne.',
+    },
+  };
+
+  function renderSaveState() {
+    const def = SAVE_STATES[saveMode];
+    saveState.hidden = !def;
+    if (!def) return;
+    saveState.className = 'save-state save-state--' + def.tone;
+    saveStateText.textContent = def.text();
+    saveAction = def.action ? def.action[1] : null;
+    saveStateAction.hidden = !def.action;
+    if (def.action) saveStateAction.textContent = def.action[0];
+  }
+  saveStateAction.addEventListener('click', () => saveAction && saveAction());
+
+  async function switchCode() {
+    await C.logout();
+    cloudRole = null;
+    collection = collection.filter((it) => !it.remote);
+    showLock('');
+  }
+
+  const FILE_STATES = {
+    waiting: () => 'en attente',
+    sending: (pct) => `envoi ${pct || 0} %`,
+    verifying: () => 'vérification…',
+    saved: () => '✓ enregistré en ligne',
+    already: () => '✓ déjà en ligne',
+    failed: (reason) => '✗ ' + (reason || 'échec'),
+  };
+  const fileRows = new Map();
+
+  function onFileState(item, state, detail) {
+    let row = fileRows.get(item);
+    if (!row) {
+      row = document.createElement('li');
+      const name = document.createElement('span');
+      name.textContent = item.name;
+      const badge = document.createElement('span');
+      badge.className = 'file-state';
+      row.append(name, badge);
+      fileRows.set(item, row);
+      uploadFiles.appendChild(row);
+    }
+    const badge = row.lastChild;
+    badge.className = 'file-state file-state--' + state;
+    badge.textContent = FILE_STATES[state](detail);
+    uploadFiles.hidden = false;
+  }
+
+  cloudTest.addEventListener('click', async () => {
+    cloudTest.disabled = true;
+    cloudTestResult.hidden = false;
+    cloudTestResult.textContent = '';
+    const wait = document.createElement('li');
+    wait.textContent = 'Test en cours…';
+    cloudTestResult.appendChild(wait);
+    try {
+      const res = await C.diagnostic();
+      cloudTestResult.textContent = '';
+      for (const step of res.steps) {
+        const li = document.createElement('li');
+        const label = document.createElement('span');
+        label.textContent = step.label;
+        const value = document.createElement('span');
+        value.className = 'file-state ' + (step.ok ? 'is-ok' : 'is-ko');
+        value.textContent = (step.ok ? '✓ ' : '✗ ') + (step.detail || '');
+        li.append(label, value);
+        cloudTestResult.appendChild(li);
+      }
+      status.textContent = res.ok
+        ? '✓ Le stockage en ligne fonctionne : écriture, vérification, relecture et suppression réussies.'
+        : '✗ Le stockage en ligne a un problème : voir le détail ci-dessus.';
+    } catch (err) {
+      cloudTestResult.textContent = '';
+      status.textContent = 'Test impossible : ' + err.message;
+    } finally {
+      cloudTest.disabled = false;
+    }
+  });
+
   function renderUploadProgress(p) {
     const ratio = p.totalBytes ? p.loadedBytes / p.totalBytes : p.total ? p.done / p.total : 0;
     uploadFill.style.transform = `scaleX(${Math.min(1, ratio)})`;
     uploadText.textContent =
-      `Envoi : ${Math.floor(ratio * 100)} % — ${p.done} / ${p.total} fichiers · ` +
+      `Envoi : ${Math.floor(ratio * 100)} % — ${p.saved} / ${p.total} enregistrés · ` +
       `${formatBytes(p.loadedBytes)} / ${formatBytes(p.totalBytes)}`;
     uploadCurrent.textContent = p.current.length ? 'En cours : ' + p.current.join(', ') : '';
   }
@@ -251,22 +375,33 @@
     uploadFill.style.transform = 'scaleX(0)';
     uploadText.textContent = 'Préparation de l’envoi…';
     uploadCurrent.textContent = '';
+    uploadFiles.textContent = '';
+    fileRows.clear();
     setBusy(true);
     renderCloud();
     await C.keepAwake(true);
     const existing = new Set(onlineItems.map((it) => it.pathname));
     try {
-      const res = await C.uploadAll(pending, { existing, signal: uploadCtrl.signal, onProgress: renderUploadProgress });
+      const res = await C.uploadAll(pending, {
+        existing,
+        signal: uploadCtrl.signal,
+        onProgress: renderUploadProgress,
+        onFile: onFileState,
+      });
       lastFailed = res.failed;
+      // Relecture de la liste depuis le serveur : c'est elle qui fait foi.
       onlineItems = await C.list();
       const online = new Set(onlineItems.map((it) => it.pathname));
       const uploaded = pending.filter((it) => it.pathname && online.has(it.pathname));
+      const confirmedListed = res.sent.filter((it) => online.has(it.pathname)).length;
       L.releaseAll(uploaded);
       collection = onlineItems.concat(collection.filter((it) => !it.remote && uploaded.indexOf(it) === -1));
       const parts = [];
-      if (res.sent.length) parts.push(`${plural(res.sent.length, 'souvenir envoyé', 'souvenirs envoyés')} en ligne ☁️`);
+      if (confirmedListed) {
+        parts.push(`✓ ${plural(confirmedListed, 'souvenir enregistré et vérifié', 'souvenirs enregistrés et vérifiés')} en ligne`);
+      }
       if (res.skipped) parts.push(`${res.skipped} déjà en ligne`);
-      if (res.failed.length) parts.push(`${res.failed.length} en échec`);
+      if (res.failed.length) parts.push(`✗ ${res.failed.length} non enregistré${res.failed.length > 1 ? 's' : ''}`);
       if (res.aborted) parts.unshift('Envoi arrêté');
       status.textContent = parts.join(' · ') || 'Rien à envoyer.';
     } catch (err) {
@@ -300,6 +435,7 @@
   /** Connecté : charge l'album en ligne et ouvre l'écran adapté. */
   async function enterCloud(role) {
     cloudRole = role;
+    saveMode = role === 'admin' ? 'cloud-admin' : 'cloud-viewer';
     try {
       onlineItems = await C.list();
     } catch (err) {
@@ -318,6 +454,7 @@
     }
     show('setup');
     if (role === 'admin') await restoreFromDevice(); // souvenirs gardés sur l'iPhone → à envoyer
+    renderSaveState();
     renderSummary();
     renderCloud();
     if (role === 'viewer' && !collection.length) status.textContent = 'L’album en ligne est encore vide.';
@@ -353,6 +490,9 @@
 
   $('lock-local').addEventListener('click', () => {
     throughVeil(async () => {
+      saveMode = 'local-chosen';
+      renderSaveState();
+      renderCloud();
       show('setup');
       renderSummary();
       await restoreFromDevice();
@@ -387,7 +527,9 @@
       });
       skippedAll = skippedAll.concat(result.skipped);
       if (result.added) {
-        status.textContent = `${plural(result.added, 'souvenir ajouté', 'souvenirs ajoutés')} 💞`;
+        status.textContent =
+          `${plural(result.added, 'souvenir ajouté', 'souvenirs ajoutés')} 💞` +
+          (cloudRole === 'admin' ? '' : keepLocal ? ' — gardés sur cet appareil seulement' : ' — pour cette visite seulement, pas sauvegardés en ligne');
       } else if (!collection.length) {
         status.textContent = 'Aucune photo ni vidéo compatible dans cette sélection.';
       } else {
@@ -615,6 +757,17 @@
       if (C.info.role) return enterCloud(C.info.role);
       return showLock(linkError);
     }
+    // Pas d'album en ligne : on le dit clairement au lieu de faire semblant.
+    const deployed = /^https?:$/.test(location.protocol) && !/^(localhost|127\.|192\.168\.|10\.|\[::1\])/.test(location.hostname);
+    if (online && !online.configured) {
+      saveMode = 'not-configured';
+      saveMissing = online.missing || [];
+    } else if (!online && deployed) {
+      saveMode = 'no-api';
+    } else {
+      saveMode = 'local';
+    }
+    renderSaveState();
     show('setup');
     renderSummary();
     await restoreFromDevice();
@@ -634,6 +787,9 @@
     },
     get onlineItems() {
       return onlineItems;
+    },
+    get saveMode() {
+      return saveMode;
     },
   };
 

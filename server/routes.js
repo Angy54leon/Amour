@@ -7,12 +7,15 @@
  *  POST   /api/deconnexion
  *  GET    /api/souvenirs       liste + URL signées (connecté)
  *  DELETE /api/souvenirs       { pathname } (ADMIN_CODE)
- *  POST   /api/televersement   jeton d'envoi direct navigateur → Vercel Blob (ADMIN_CODE)
+ *  POST   /api/televersement   autorisation d'envoi direct navigateur → stockage (ADMIN_CODE)
+ *  POST   /api/confirmer       { pathname, size } : vérifie que le fichier est bien stocké
+ *                              et l'inscrit dans l'album — seule source du « ✓ enregistré »
+ *  GET    /api/diagnostic      teste écriture / relecture / suppression (ADMIN_CODE)
  *  PUT    /api/fichier         envoi vers le stockage local de test (ADMIN_CODE)
  *  GET    /api/fichier         lecture signée du stockage local de test
  */
-import { authConfigured, roleForCode, roleOf, sessionCookie, clearedCookie, sameOrigin } from './auth.js';
-import { getStorage, describe, isValidPathname, MAX_FILE_BYTES, CONTENT_TYPES } from './storage.js';
+import { authConfigured, authProblems, roleForCode, roleOf, sessionCookie, clearedCookie, sameOrigin } from './auth.js';
+import { getStorage, describe, isValidPathname, diagnose, MAX_FILE_BYTES, CONTENT_TYPES } from './storage.js';
 
 function send(res, status, data, extraHeaders = {}) {
   const body = JSON.stringify(data);
@@ -45,19 +48,32 @@ function status() {
   return {
     configured: !!storage && authConfigured(),
     storage: storage ? storage.kind : null,
-    missing: [
-      !storage && 'stockage (Vercel Blob)',
-      !process.env.ALBUM_CODE && 'ALBUM_CODE',
-      !process.env.ADMIN_CODE && 'ADMIN_CODE',
-    ].filter(Boolean),
+    missing: [!storage && 'stockage en ligne (Vercel Blob ou Supabase)'].filter(Boolean).concat(authProblems()),
   };
+}
+
+function needAdmin(req, res) {
+  if (roleOf(req) !== 'admin') {
+    send(res, 403, { error: 'Réservé au code administrateur' });
+    return false;
+  }
+  if (!sameOrigin(req)) {
+    send(res, 403, { error: 'Origine refusée' });
+    return false;
+  }
+  return true;
 }
 
 const routes = {
   async session(req, res) {
     if (req.method !== 'GET') return send(res, 405, { error: 'Méthode non autorisée' });
     const s = status();
-    send(res, 200, { ...s, role: s.configured ? roleOf(req) : null, maxFileBytes: MAX_FILE_BYTES });
+    const storage = getStorage();
+    send(res, 200, {
+      ...s,
+      role: s.configured ? roleOf(req) : null,
+      maxFileBytes: storage ? storage.maxFileBytes : MAX_FILE_BYTES,
+    });
   },
 
   async connexion(req, res) {
@@ -86,7 +102,8 @@ const routes = {
     if (req.method === 'GET') {
       const entries = (await storage.list()).filter((e) => isValidPathname(e.pathname));
       const { urls, expiresAt } = await storage.readUrls(entries);
-      const items = entries.map((e, i) => describe(e, urls[i])).filter(Boolean);
+      // Un média sans lien de lecture (fichier absent du stockage) n'est pas proposé.
+      const items = entries.map((e, i) => (urls[i] ? describe(e, urls[i]) : null)).filter(Boolean);
       return send(res, 200, { items, expiresAt });
     }
 
@@ -105,8 +122,27 @@ const routes = {
   async televersement(req, res) {
     if (req.method !== 'POST') return send(res, 405, { error: 'Méthode non autorisée' });
     const storage = getStorage();
-    if (!storage || storage.kind !== 'vercel-blob') return send(res, 404, { error: 'Indisponible' });
+    if (!storage) return send(res, 404, { error: 'Indisponible' });
     const body = await readJson(req);
+
+    if (storage.kind !== 'vercel-blob') {
+      // Supabase / local : lien d'envoi signé, à usage unique, pour ce seul fichier.
+      if (!needAdmin(req, res)) return;
+      const { pathname, size, contentType } = body || {};
+      if (!isValidPathname(pathname)) return send(res, 400, { error: 'Nom de fichier refusé' });
+      if (!(size > 0)) return send(res, 400, { error: 'Fichier vide' });
+      if (size > storage.maxFileBytes) {
+        return send(res, 413, { error: `Fichier trop volumineux (max ${Math.round(storage.maxFileBytes / 1048576)} Mo)` });
+      }
+      const type = CONTENT_TYPES[pathname.split('.').pop()];
+      try {
+        return send(res, 200, await storage.uploadTarget(pathname, { contentType: contentType === type ? contentType : type, size }));
+      } catch (err) {
+        const exists = /exist|duplicate/i.test(err.message || '') || err.status === 409;
+        return send(res, exists ? 409 : 502, { error: exists ? 'Ce fichier est déjà en ligne' : err.message });
+      }
+    }
+
     // Vercel rappelle aussi cette route à la fin d'un envoi (signature vérifiée par le SDK).
     const isBrowserTokenRequest = body && body.type === 'blob.generate-client-token';
     if (isBrowserTokenRequest && (roleOf(req) !== 'admin' || !sameOrigin(req))) {
@@ -120,6 +156,32 @@ const routes = {
     } catch (err) {
       send(res, 400, { error: err.message || 'Envoi refusé' });
     }
+  },
+
+  async confirmer(req, res) {
+    if (req.method !== 'POST') return send(res, 405, { error: 'Méthode non autorisée' });
+    const storage = getStorage();
+    if (!storage) return send(res, 404, { error: 'Indisponible' });
+    if (!needAdmin(req, res)) return;
+    const { pathname, size } = await readJson(req);
+    if (!isValidPathname(pathname)) return send(res, 400, { error: 'Nom de fichier refusé' });
+    try {
+      const result = await storage.confirm(pathname, Number(size) || 0);
+      send(res, 200, { ok: true, pathname, size: result.size });
+    } catch (err) {
+      const missing = /not.?found|does not exist|n'existe|ENOENT|404/i.test(err.message || '') || err.status === 404;
+      send(res, missing ? 404 : err.status === 409 ? 409 : 502, {
+        error: missing ? 'Fichier introuvable dans le stockage en ligne' : err.message,
+      });
+    }
+  },
+
+  async diagnostic(req, res) {
+    if (req.method !== 'GET') return send(res, 405, { error: 'Méthode non autorisée' });
+    const storage = getStorage();
+    if (!storage) return send(res, 200, { ok: false, steps: [{ label: 'Stockage détecté', ok: false, detail: 'aucun stockage configuré' }] });
+    if (!needAdmin(req, res)) return;
+    send(res, 200, await diagnose(storage));
   },
 
   async fichier(req, res) {

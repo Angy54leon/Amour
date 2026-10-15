@@ -38,13 +38,23 @@
     return data;
   }
 
+  /** Pourquoi l'album en ligne est indisponible : 'file' | 'no-api' | 'network' | null */
+  let problem = null;
+  let problemStatus = 0;
+
   /** null si le site n'a pas de serveur (fichier local, GitHub Pages…). */
   async function status() {
-    if (location.protocol === 'file:') return null;
+    problem = null;
+    if (location.protocol === 'file:') {
+      problem = 'file';
+      return null;
+    }
     try {
       info = await api('session');
       return info;
-    } catch (_) {
+    } catch (err) {
+      problem = err.status ? 'no-api' : 'network';
+      problemStatus = err.status || 0;
       return null;
     }
   }
@@ -192,21 +202,34 @@
     return blobClient;
   }
 
-  /** Envoi vers le stockage local de test (même protocole côté serveur). */
-  function putLocal(pathname, item, onProgress, signal) {
-    return new Promise((resolve, reject) => {
+  function errorFromXhr(xhr) {
+    let msg = `Erreur ${xhr.status}`;
+    try {
+      const data = JSON.parse(xhr.responseText);
+      msg = data.error || data.message || msg;
+      if (typeof msg !== 'string') msg = JSON.stringify(msg);
+    } catch (_) {}
+    return Object.assign(new Error(msg), { status: xhr.status });
+  }
+
+  /**
+   * Supabase / stockage de test : le serveur fournit un lien d'envoi signé pour
+   * CE fichier, puis le navigateur l'envoie directement (progression réelle).
+   */
+  async function putSigned(pathname, item, onProgress, signal) {
+    const target = await api('televersement', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pathname, size: item.size, contentType: contentTypeOf(item, pathname) }),
+    });
+    await new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open('PUT', 'api/fichier?pathname=' + encodeURIComponent(pathname));
-      xhr.setRequestHeader('Content-Type', contentTypeOf(item, pathname));
+      xhr.open('PUT', target.url);
+      const headers = target.headers || {};
+      if (!headers['content-type']) xhr.setRequestHeader('Content-Type', contentTypeOf(item, pathname));
+      for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
       xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded);
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) return resolve();
-        let msg = `Erreur ${xhr.status}`;
-        try {
-          msg = JSON.parse(xhr.responseText).error || msg;
-        } catch (_) {}
-        reject(Object.assign(new Error(msg), { status: xhr.status }));
-      };
+      xhr.onload = () => (xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(errorFromXhr(xhr)));
       xhr.onerror = () => reject(new Error('Connexion perdue'));
       xhr.onabort = () => reject(Object.assign(new Error('Envoi arrêté'), { name: 'AbortError' }));
       if (signal) signal.addEventListener('abort', () => xhr.abort(), { once: true });
@@ -226,28 +249,44 @@
     });
   }
 
+  /** Le serveur vérifie que le fichier est réellement stocké, puis l'inscrit. */
+  async function confirm(pathname, size) {
+    return api('confirmer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pathname, size }),
+    });
+  }
+
   function isAlreadyThere(err) {
-    return err && (err.status === 409 || /already exists|existe d[ée]j[aà]|déjà en ligne/i.test(err.message || ''));
+    return err && (err.status === 409 || /already exists|duplicate|existe d[ée]j[aà]|déjà en ligne/i.test(err.message || ''));
   }
 
   function humanError(err) {
     const msg = (err && err.message) || '';
-    if (/too large|maximumSizeInBytes|trop volumineux|413/i.test(msg)) return 'fichier trop volumineux';
-    if (/content type|allowedContentTypes/i.test(msg)) return 'format refusé';
+    if (/too large|maximumSizeInBytes|trop volumineux|413|exceeded the maximum allowed size/i.test(msg)) {
+      return 'fichier trop volumineux pour le stockage';
+    }
+    if (/content type|allowedContentTypes|mime/i.test(msg)) return 'format refusé';
     if (/quota|storage limit|limit exceeded|payment/i.test(msg)) return 'espace de stockage plein (limite de l’offre)';
     if (/403|administrateur|forbidden/i.test(msg)) return 'session expirée : reconnecte-toi avec le code administrateur';
     if (/network|fetch|connexion|Load failed/i.test(msg)) return 'connexion perdue';
     return msg || 'erreur inconnue';
   }
 
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
   /**
-   * Envoie les médias locaux qui ne sont pas encore en ligne.
+   * Envoie les médias locaux qui ne sont pas encore en ligne. Un fichier n'est
+   * compté comme enregistré qu'après la confirmation du serveur.
    * @param {object[]} items médias avec `file`
-   * @param {{onProgress?: Function, signal?: AbortSignal, existing?: Set<string>}} opts
-   * @returns {Promise<{sent: object[], skipped: number, failed: {item: object, reason: string}[]}>}
+   * @param {{onProgress?: Function, onFile?: Function, signal?: AbortSignal, existing?: Set<string>}} opts
+   *   onFile(item, état, détail) — état : 'waiting' | 'sending' | 'verifying' | 'saved' | 'already' | 'failed'
+   * @returns {Promise<{sent: object[], skipped: number, failed: {item: object, reason: string}[], aborted: boolean}>}
    */
   async function uploadAll(items, opts) {
     const options = opts || {};
+    const onFile = options.onFile || (() => {});
     const existing = options.existing || new Set();
     const maxBytes = (info && info.maxFileBytes) || Infinity;
     const tasks = [];
@@ -256,7 +295,16 @@
       const pathname = await onlinePathname(item);
       tasks.push({ item, pathname, loaded: 0 });
     }
-    const todo = tasks.filter((t) => !existing.has(t.pathname));
+    const todo = [];
+    for (const t of tasks) {
+      if (existing.has(t.pathname)) {
+        t.item.pathname = t.pathname;
+        onFile(t.item, 'already');
+      } else {
+        todo.push(t);
+        onFile(t.item, 'waiting');
+      }
+    }
     const skipped = tasks.length - todo.length;
     const totalBytes = todo.reduce((s, t) => s + t.item.size, 0);
     const sent = [];
@@ -268,6 +316,7 @@
       const loaded = todo.reduce((s, t) => s + Math.min(t.loaded, t.item.size), 0);
       options.onProgress({
         done: sent.length + failed.length,
+        saved: sent.length,
         total: todo.length,
         loadedBytes: loaded,
         totalBytes,
@@ -275,39 +324,69 @@
       });
     };
 
-    async function sendOne(task) {
+    function fail(item, reason) {
+      failed.push({ item, reason });
+      onFile(item, 'failed', reason);
+    }
+
+    async function transfer(task) {
       const { item, pathname } = task;
-      if (item.size > maxBytes) {
-        failed.push({ item, reason: 'fichier trop volumineux' });
-        return;
-      }
-      const put = info && info.storage === 'local' ? putLocal : putBlob;
+      const put = info && info.storage === 'vercel-blob' ? putBlob : putSigned;
       for (let attempt = 0; ; attempt++) {
         try {
           task.loaded = 0;
           await put(pathname, item, (loaded) => {
             task.loaded = loaded;
+            onFile(item, 'sending', Math.min(99, Math.floor((loaded / item.size) * 100)));
             report();
           }, options.signal);
-          task.loaded = item.size;
-          item.pathname = pathname;
-          sent.push(item);
           return;
         } catch (err) {
           if (options.signal && options.signal.aborted) throw err;
-          if (isAlreadyThere(err)) {
-            task.loaded = item.size;
-            item.pathname = pathname;
-            sent.push(item);
-            return;
-          }
+          if (isAlreadyThere(err)) return; // déjà stocké : la confirmation tranchera
           const reason = humanError(err);
           const retryable = reason === 'connexion perdue' || (err.status && err.status >= 500);
           if (attempt < RETRIES && retryable) {
-            await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+            await wait(1500 * (attempt + 1));
             continue;
           }
-          failed.push({ item, reason });
+          throw Object.assign(new Error(reason), { reported: true });
+        }
+      }
+    }
+
+    async function sendOne(task) {
+      const { item, pathname } = task;
+      if (item.size > maxBytes) {
+        fail(item, `fichier trop volumineux (max ${Math.round(maxBytes / 1048576)} Mo)`);
+        return;
+      }
+      onFile(item, 'sending', 0);
+      try {
+        await transfer(task);
+      } catch (err) {
+        if (options.signal && options.signal.aborted) throw err;
+        fail(item, err.reported ? err.message : humanError(err));
+        return;
+      }
+      task.loaded = item.size;
+      onFile(item, 'verifying');
+      report();
+      // Confirmation : seul le serveur peut dire « c'est enregistré ».
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await confirm(pathname, item.size);
+          item.pathname = pathname;
+          sent.push(item);
+          onFile(item, 'saved');
+          return;
+        } catch (err) {
+          const retryable = err.status === 404 || !err.status || err.status >= 500;
+          if (attempt < 2 && retryable && !(options.signal && options.signal.aborted)) {
+            await wait(1200 * (attempt + 1)); // le temps que le stockage rende le fichier visible
+            continue;
+          }
+          fail(item, 'envoyé mais non confirmé : ' + humanError(err));
           return;
         }
       }
@@ -339,6 +418,11 @@
     return { sent, skipped, failed, aborted: !!(options.signal && options.signal.aborted) };
   }
 
+  /** Autodiagnostic du stockage en ligne (code administrateur). */
+  async function diagnostic() {
+    return api('diagnostic');
+  }
+
   /* ---------- Écran allumé pendant l'envoi ---------- */
 
   let wakeLock = null;
@@ -367,8 +451,15 @@
     uploadAll,
     onlinePathname,
     keepAwake,
+    diagnostic,
     get info() {
       return info;
+    },
+    get problem() {
+      return problem;
+    },
+    get problemStatus() {
+      return problemStatus;
     },
   };
 })(window.Amour);

@@ -56,6 +56,12 @@
           rien n'est envoyé sur Internet.
         </p>
 
+        <!-- État réel de la sauvegarde : jamais de promesse non vérifiée -->
+        <div class="save-state" id="save-state" role="status" hidden>
+          <p class="save-state-text" id="save-state-text"></p>
+          <button type="button" class="link-btn" id="save-state-action" hidden></button>
+        </div>
+
         <div class="setup-actions">
           <label class="soft-btn soft-btn--primary soft-btn--big" id="add-label">
             <input type="file" id="pick-files" class="file-input" multiple accept="image/*,video/*">
@@ -86,6 +92,7 @@
             <p class="upload-tip">Garde Safari ouvert et l'écran allumé pendant l'envoi.</p>
             <button type="button" class="link-btn" id="upload-stop">Arrêter l'envoi</button>
           </div>
+          <ul class="upload-files" id="upload-files" aria-live="polite" hidden></ul>
           <details class="setup-skipped" id="upload-failed" hidden>
             <summary></summary>
             <ul></ul>
@@ -95,6 +102,8 @@
             <summary>Gérer les souvenirs en ligne</summary>
             <ul class="cloud-list" id="cloud-list"></ul>
           </details>
+          <button type="button" class="link-btn" id="cloud-test">🔎 Tester la sauvegarde en ligne</button>
+          <ul class="cloud-test-result" id="cloud-test-result" hidden></ul>
           <button type="button" class="link-btn" id="cloud-logout">Se déconnecter de cet appareil</button>
         </div>
 
